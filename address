@@ -1,0 +1,7 @@
+# 使用示例
+if __name__ == "__main__":
+    file1_path = "/home/amber/postpro/case230427_4_x0712xomegaz.csv"  # 替换为你的第一个CSV文件路径
+    file2_path = "/home/amber/postpro/case230427_4_x0712xyy.csv"  # 替换为你的第二个CSV文件路径
+    file3_path = "/home/amber/postpro/case230427_4_x0712xua.csv"  # 替换为你的第三个CSV文件路径
+    output_path = "/home/amber/postpro/output_results0712.csv"  # 替换为你的输出CSV文件路径
+    find_sign_changes_and_values(file1_path, file2_path, file3_path, output_path)

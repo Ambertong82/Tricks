@@ -7,11 +7,15 @@ R = (3217 - 1000) / 1000
 rho_0 = 1000
 rho_1 = 1007.7
 rho_2 = 3217
+alphaKomega = 0.6
+Cmu = 0.09
+Sc = 1
+nu = 1e-6  # Kinematic viscosity
 # H = 0.3
 
 # File list generation
 file_list = [
-    f'/home/amber/postpro/rawdata/case230427_4_{i}.csv' for i in range(20, 40)]
+    f'/home/amber/postpro/rawdata/case230427_4_{i}.csv' for i in range(19, 40)]
 all_results = pd.DataFrame()
 x_values = []  # Store x values for gradient calculation
 h_values = []  # Store h values for gradient calculation
@@ -40,13 +44,79 @@ for i, file in enumerate(file_list):
                     t = point_data.at[2, 'Time'] if len(
                         point_data) > 2 else np.nan
                     ua_values = point_data['U.a:0']
+                    ub_values = point_data['U.b:0']
+                    ua_valuesy = point_data['U.a:1']
+                    ub_valuesy = point_data['U.b:1']
                     ya_values = point_data['Points:1']
                     alpha_values = point_data['alpha.a']
                     kb_values = point_data['k.b']
-                    grad_Ub = point_data['grad(U.b):3']
+                    grad_dvdx = point_data['grad(U.b):1']
+                    grad_dudy = point_data['grad(U.b):3']
+                    grad_dudx = point_data['grad(U.b):0']
+                    grad_dvdy = point_data['grad(U.b):4']
+                    nut_values = point_data['nut.b']
+                    grad_dkdx = point_data['grad(k.b):0']
+                    grad_dkdy = point_data['grad(k.b):1']
+                    omega_values = point_data['omega.b']
+                    grad_dalphadx = point_data['grad(alpha.a):0']
+                    grad_dalphady = point_data['grad(alpha.a):1']
+                    # grad_dbetadx = point_data['grad(alpha.b):0']
+                    # grad_dbetady = point_data['grad(alpha.b):1']
+                    gamma_values = point_data['K']
 
-                    # 确保数据有效性
-                    
+                    # calculate velocity shear stress
+                    S_xx = grad_dudx
+                    S_yy = grad_dvdy
+                    S_xy = (grad_dvdx + grad_dudy) / 2
+                    Sij_Sij = S_xx**2 + S_yy**2 + 2 * S_xy**2
+
+                    # calculate turbulent generation
+                    P_k = 2 * nut_values * Sij_Sij * 1000 * (1 - alpha_values)
+
+                    # calculate laplacian of k transportation
+                    P1 = grad_dkdx * alpha_values * rho_0 * nut_values * alphaKomega
+                    P2 = grad_dkdy * alpha_values * rho_0 * nut_values * alphaKomega
+                    d2kdx2 = np.gradient(P1, 0.008, edge_order=2)
+                    d2kdy2 = np.gradient(P2, ya_values, edge_order=2)
+                    laplacian_k = d2kdx2 + d2kdy2
+
+                    # calculate dissipation rate
+                    epsilon_alpharho = Cmu * kb_values * \
+                        omega_values * (1 - alpha_values) * rho_0
+
+                    # calulate turbulent diffusion flux
+                    D1 = grad_dkdx * alpha_values * rho_0 * nu
+                    D2 = grad_dkdy * alpha_values * rho_0 * nu
+                    Dd2kdx2 = np.gradient(D1, 0.008, edge_order=2)
+                    Dd2kdy2 = np.gradient(D2, ya_values, edge_order=2)
+                    D_k = Dd2kdx2 + Dd2kdy2
+
+                    # calculate first part of drag force
+                    G11 = gamma_values * \
+                        (ub_values - ua_values) * nut_values * grad_dalphadx / (Sc * (1 - alpha_values))
+                    G12 = gamma_values * \
+                        (ub_valuesy - ua_valuesy) * nut_values * grad_dalphady / (Sc * (1 - alpha_values))
+                    G = G11 + G12
+
+                    # calculate second part of drag force
+                    G2 = gamma_values * (1 / np.sqrt(Sc) - 1) * \
+                        2 * alpha_values * kb_values
+
+                    # calculate third part of drag force
+                    beta_values = (1 - alpha_values)
+                    grad_dbetadx = np.gradient(
+                        beta_values * rho_0, 0.008, edge_order=2)
+                    grad_dbetady = np.gradient(
+                        beta_values * rho_0, ya_values, edge_order=2)
+                    d2betadx2 = np.gradient(grad_dbetadx, 0.008, edge_order=2)
+                    d2betady2 = np.gradient(
+                        grad_dbetady, ya_values, edge_order=2)
+                    laplacian_beta = d2betadx2 + d2betady2
+
+                    G3 = gamma_values * (1 / np.sqrt(Sc) - 1) * rho_0 * beta_values * \
+                        kb_values * nut_values * laplacian_beta / (omega_values * Sc)
+
+                    # find the maximum value of ya_values
                     alpha_values = np.maximum(point_data['alpha.a'], 0)
                     valid_mask = (ua_values > 0) & (alpha_values > 1e-5)
                     valid_ya = ya_values[valid_mask] if valid_mask.any(
@@ -69,37 +139,6 @@ for i, file in enumerate(file_list):
                             max_ya_crossing_index = positive_to_negative[np.argmax(
                                 crossing_ya)]
 
-                        # 计算积分
-                    # sum1 = (ua_alpha_values[1:max_ya_crossing_index] +
-                    #         ua_alpha_values[:max_ya_crossing_index - 1]) * differences[1:max_ya_crossing_index] / 2
-                    # integral = np.sum(sum1)
-                    # alpha_values = np.maximum(point_data['alpha.a'], 0)
-                    # ua_values = np.where(ua_values > 0, ua_values, 0)  #
-
-                    # 找到速度从正变负的交界点
-                    # sign_changes = np.where(np.diff(np.sign(ua_values)))[0]
-                    # if len(sign_changes) > 0:
-                    #     # 筛选出速度从正变负的点（ua_values[sign_changes] > 0 且
-                    #     # ua_values[sign_changes+1] < 0）
-                    #     positive_to_negative = [i for i in sign_changes
-                    #                             if i + 1 < len(ua_values)
-                    #                             and ua_values[i] > 0
-                    #                             and ua_values[i + 1] < 0]
-
-                    #     if len(positive_to_negative) > 0:
-                    #         crossing_ya = ya_values[positive_to_negative]
-                    #     # 找到 y 最大的那个交界点
-                    #         max_ya_crossing_index = positive_to_negative[np.argmax(
-                    #             crossing_ya)]
-                    # zero_crossing_index = positive_to_negative[0]
-                    # print('*********depth********************')
-                    # print('positive_to_negative', positive_to_negative)
-                    # print('index_of_max_ya:', max_ya_crossing_index)
-                    # print('ya_values:', ya_values[max_ya_crossing_index])
-                    # print('ua_values:', ua_values[max_ya_crossing_index])
-                    # print('ua_values+1', ua_values[max_ya_crossing_index +
-                    # 1])
-
                     # 这是通过速度大于0来判断的交界点 但是存在问题 比如当底部速度是负值的时候
                     valid_mask = (ua_values > 0) & (alpha_values > 1e-5)
 
@@ -108,25 +147,12 @@ for i, file in enumerate(file_list):
                         valid_ya = ya_values[valid_mask]
                         index_of_max_ya = valid_ya.idxmax()
 
-                    # print('*****************************')
-                    # print('index_of_max_ya:', index_of_max_ya)
-                    # print('ya_values:', ya_values[index_of_max_ya])
-                    # print('ua_values:', ua_values[index_of_max_ya])
-
-                    # # Combined conditions: ua > 0 AND alpha > 1e-5
-                    # valid_mask = (ua_values > 0) # & (alpha_values > 5e-5)  #
-                    # 找到速度大于0的点以及alpha大于1e-5的点
-
-                    # valid_ya = ya_values[valid_mask]
-                    # index_of_max_ya = valid_ya.idxmax()
-
-                    # print('index_of_max_ya:', index_of_max_ya)
-
                     # Richardson number calculation
                     rho_mix = alpha_values * 3217 + \
                         (1 - alpha_values) * 1000
                     drhody = np.gradient(rho_mix, ya_values)
                     # Rig = -g * drhody / (rho_0 * grad_Ub**2)
+                    #print("ya_values:", ya_values[max_ya_crossing_index])
 
                     # Velocity and depth calculations
                     differences = ya_values.diff()
@@ -135,7 +161,7 @@ for i, file in enumerate(file_list):
                     #### Mass Flux height #####
                     # 确保 alpha_values 非负  # 计算质量通量 alpha*v
                     ua_alpha_values = abs(ua_values * alpha_values)
-                    ua_values_abs = abs(ua_values)
+                    ua_values_abs = (ua_values)
                     # if index_of_max_ya <= 1 or index_of_max_ya > len(ua_alpha_values):
                     #     print(f"Invalid index_of_max_ya: {index_of_max_ya}")
                     #     continue
@@ -143,7 +169,7 @@ for i, file in enumerate(file_list):
                     #         ua_alpha_values[:-1]) * differences / 2
                     sum1 = (ua_alpha_values[1:max_ya_crossing_index] + \
                             ua_alpha_values[:max_ya_crossing_index - 1]) * differences[1:max_ya_crossing_index] / 2
-                    sum2 = (ua_values_abs[1:max_ya_crossing_index] + ua_values_abs[:max_ya_crossing_index - 1]
+                    sum2 = (ua_values_abs[1:max_ya_crossing_index] + ua_values_abs[: max_ya_crossing_index- 1]
                             ) * differences[1:max_ya_crossing_index] / 2
                     sum1[0] = 0
                     sum2[0] = 0
@@ -151,42 +177,83 @@ for i, file in enumerate(file_list):
                     integral = np.sum(sum1)
                     integralU = np.sum(sum2)
                     # print('integral:', integral)
-                    # print('integralU:', integralU)
+                    #print('integralU:', integralU)
                     # print('integral:', integral)
                     alpha_ua_squre = (ua_values * alpha_values)**2
                     ua_squre = ua_values**2
 
-                    addU = (ua_squre[:max_ya_crossing_index - 1] + \
-                            ua_squre[1:max_ya_crossing_index]) * differences[1:max_ya_crossing_index] / 2
+                    addU = (ua_squre[:max_ya_crossing_index- 1] + \
+                            ua_squre[1:max_ya_crossing_index]) * differences[1:max_ya_crossing_index]/ 2
                     # integralU2 = sum(addU[1:index_of_max_ya])
                     integralU2 = np.sum(addU)
                     addc = (alpha_ua_squre[:max_ya_crossing_index - 1] + \
                             alpha_ua_squre[1:max_ya_crossing_index]) * differences[1:max_ya_crossing_index] / 2
                     integral2 = np.sum(addc)
                     # integral2 = sum(addc[1:index_of_max_ya])
-                    # print('integralU2:', integralU2)
+                    #print('integralU2:', integralU2)
 
                     U = integralU2 / integralU if integral != 0 else 0
                     H = integral**2 / integral2 if integral2 != 0 else 0
                     ALPHA = integral / integralU if integralU != 0 else 0
-                    # print(ALPHA)
+                    H_depth = integralU**2 / integralU2 if integralU2 != 0 else 0
+                    #print("h_depth:", H_depth)
+##########################################################################
+########################################## 计算深度平均的TKE BUDGET #############
 
-                    #### TKE height ####
-                    # h_tke = (kb_values[:-1] +
-                    #          kb_values[1:]) * differences / 2
-                    # h_tke[0] = 0
-                    # H_tke = np.sum(h_tke) / 0.3
+                    # depth-averaged turbulent generation
+
+                    add_P_k = P_k[1:max_ya_crossing_index] + P_k[: max_ya_crossing_index-1] * differences[1:max_ya_crossing_index] / 2
+                    integral_P_k = np.sum(add_P_k)
+                    p_k_average = integral_P_k / H if H != 0 else 0
+                    #print('difference:', differences)
+
+                    # transport turbulent ##
+                    add_T_k = laplacian_k[1:max_ya_crossing_index] + \
+                        laplacian_k[:max_ya_crossing_index - 1] * differences[1:max_ya_crossing_index] / 2
+                    integral_T_k = np.sum(add_T_k)
+                    T_k_average = integral_T_k / H if H != 0 else 0
+
+                    # diffusion turbulent ##
+                    add_D_k = D_k[1:max_ya_crossing_index] + D_k[:max_ya_crossing_index -
+                                                                 1] * differences[1:max_ya_crossing_index] / 2
+                    integral_D_k = np.sum(add_D_k)
+                    D_k_average = integral_D_k / H if H != 0 else 0
+
+                    # turbulent dissipation rate
+                    add_epsilon = epsilon_alpharho[1:max_ya_crossing_index] + \
+                        epsilon_alpharho[:max_ya_crossing_index - 1] * differences[1:max_ya_crossing_index] / 2
+                    integral_epsilon = np.sum(add_epsilon)
+                    epsilon_average = integral_epsilon / H if H != 0 else 0
+
+                    # turbulent drag force part 1
+                    add_G = G[1:max_ya_crossing_index] + G[:max_ya_crossing_index -
+                                                           1] * differences[1:max_ya_crossing_index] / 2
+                    integral_G = np.sum(add_G)
+                    G_average = integral_G / H if H != 0 else 0
+                    # turbulent drag force part 2
+                    add_G2 = G2[1:max_ya_crossing_index] + G2[:max_ya_crossing_index -
+                                                              1] * differences[1:max_ya_crossing_index] / 2
+                    integral_G2 = np.sum(add_G2)
+                    G2_average = integral_G2 / H if H != 0 else 0
+                    # turbulent drag force part 3
+                    add_G3 = G3[1:max_ya_crossing_index] + G3[:max_ya_crossing_index -
+                                                              1] * differences[1:max_ya_crossing_index] / 2
+                    integral_G3 = np.sum(add_G3)
+                    G3_average = integral_G3 / H if H != 0 else 0
 
                     #### KINETIC ENERGY ####
                     alphaUa = alpha_values * ua_values**2
                     alphaUa2 = (alpha_values * ua_values**2)**2
-                    sum2 = (alphaUa[1:] + alphaUa[:-1]) / 2
+                    sum2 = (alphaUa[1:max_ya_crossing_index] +
+                            alphaUa[:max_ya_crossing_index - 1]) / 2
                     sum2[0] = 0
                     differences[0] = 0
                     # sum3 = (ua_values[1:] + ua_values[:-1]) / 2
-                    add2 = (alphaUa[1:] + alphaUa[:-1]) * differences / 2
+                    add2 = (alphaUa[1:max_ya_crossing_index] + alphaUa[:max_ya_crossing_index - 1]
+                            ) * differences[1:max_ya_crossing_index] / 2
                     intergral2up = np.sum(add2)
-                    add3 = (alphaUa2[1:] + alphaUa2[:-1]) * differences / 2
+                    add3 = (alphaUa2[1:max_ya_crossing_index] + alphaUa2[:max_ya_crossing_index - 1]
+                            ) * differences[1:max_ya_crossing_index] / 2
                     intergral2bottom = np.sum(add3)
                     h_ke = intergral2up**2 / intergral2bottom
                     # print(h_ke)
@@ -227,13 +294,20 @@ for i, file in enumerate(file_list):
                             'h_depth': [H],
                             'U': [U],
                             'ALPHA': [ALPHA],
-
+                            'H_depth': [H_depth],
                             'intergral': [integral],
                             'integralU': [integralU],
                             # 'h_rho': [h1],
                             # 'Rig': [Rig],
                             'h_ke': [h_ke],
-                            'Cd': [Cd]
+                            'Cd': [Cd],
+                            'p_k_average': [p_k_average],
+                            'T_k_average': [T_k_average],
+                            'D_k_average': [D_k_average],
+                            'epsilon_average': [epsilon_average],
+                            'G_average': [G_average],
+                            'G2_average': [G2_average],
+                            'G3_average': [G3_average]
 
                         })
                     ])
@@ -258,7 +332,7 @@ for i, file in enumerate(file_list):
 
         # Save results for this file
         all_results.to_csv(
-            f'/home/amber/postpro/depth_average/case230427_4_{i+20}.csv',
+            f'/home/amber/postpro/depth_average/case230427_4_{i}.csv',
             index=False,
             columns=[
                 'time',
@@ -268,6 +342,7 @@ for i, file in enumerate(file_list):
                 'h_depth',
                 'U',
                 'ALPHA',
+                'H_depth',
                 'intergral',
                 'integralU',
                 # 'h_rho',
@@ -276,8 +351,15 @@ for i, file in enumerate(file_list):
                 'dydx',
                 'Cd',
                 'duhdx',
-                'E'
-                ])
+                'E',
+                'p_k_average',
+                'T_k_average',
+                'D_k_average',
+                'epsilon_average',
+                'G_average',
+                'G2_average',
+                'G3_average'
+            ])
 
         # Reset for next file
         all_results = pd.DataFrame()
