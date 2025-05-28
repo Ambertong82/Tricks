@@ -17,7 +17,7 @@ data_dict8 = []
 data_dict9 = []
 data_dict10 = []
 data_dict11 = []
-A = 1/3
+A = 1 / 3
 
 for file in file_list:
     df = pd.read_csv(file)

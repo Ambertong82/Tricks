@@ -15,8 +15,8 @@ u1 = df1['U.b:0'][0:]
 u2 = df2['U.a:0'][0:]
 
 # 可视化
-plt.scatter(t1, u1, label='$d=9\mu m$')
-plt.scatter(t2, u2, label='$d=23\mu m$')
+plt.scatter(t1, u1, label='$d=9\\mu m$')
+plt.scatter(t2, u2, label='$d=23\\mu m$')
 plt.xlabel('Time (t)')
 plt.ylabel('Velocity (m/s)')
 plt.legend()

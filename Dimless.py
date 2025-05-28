@@ -152,7 +152,7 @@ for i, file in enumerate(file_list):
                         (1 - alpha_values) * 1000
                     drhody = np.gradient(rho_mix, ya_values)
                     # Rig = -g * drhody / (rho_0 * grad_Ub**2)
-                    #print("ya_values:", ya_values[max_ya_crossing_index])
+                    # print("ya_values:", ya_values[max_ya_crossing_index])
 
                     # Velocity and depth calculations
                     differences = ya_values.diff()
@@ -169,7 +169,7 @@ for i, file in enumerate(file_list):
                     #         ua_alpha_values[:-1]) * differences / 2
                     sum1 = (ua_alpha_values[1:max_ya_crossing_index] + \
                             ua_alpha_values[:max_ya_crossing_index - 1]) * differences[1:max_ya_crossing_index] / 2
-                    sum2 = (ua_values_abs[1:max_ya_crossing_index] + ua_values_abs[: max_ya_crossing_index- 1]
+                    sum2 = (ua_values_abs[1:max_ya_crossing_index] + ua_values_abs[: max_ya_crossing_index - 1]
                             ) * differences[1:max_ya_crossing_index] / 2
                     sum1[0] = 0
                     sum2[0] = 0
@@ -177,35 +177,36 @@ for i, file in enumerate(file_list):
                     integral = np.sum(sum1)
                     integralU = np.sum(sum2)
                     # print('integral:', integral)
-                    #print('integralU:', integralU)
+                    # print('integralU:', integralU)
                     # print('integral:', integral)
                     alpha_ua_squre = (ua_values * alpha_values)**2
                     ua_squre = ua_values**2
 
-                    addU = (ua_squre[:max_ya_crossing_index- 1] + \
-                            ua_squre[1:max_ya_crossing_index]) * differences[1:max_ya_crossing_index]/ 2
+                    addU = (ua_squre[:max_ya_crossing_index - 1] +
+                            ua_squre[1:max_ya_crossing_index]) * differences[1:max_ya_crossing_index] / 2
                     # integralU2 = sum(addU[1:index_of_max_ya])
                     integralU2 = np.sum(addU)
                     addc = (alpha_ua_squre[:max_ya_crossing_index - 1] + \
                             alpha_ua_squre[1:max_ya_crossing_index]) * differences[1:max_ya_crossing_index] / 2
                     integral2 = np.sum(addc)
                     # integral2 = sum(addc[1:index_of_max_ya])
-                    #print('integralU2:', integralU2)
+                    # print('integralU2:', integralU2)
 
                     U = integralU2 / integralU if integral != 0 else 0
                     H = integral**2 / integral2 if integral2 != 0 else 0
                     ALPHA = integral / integralU if integralU != 0 else 0
                     H_depth = integralU**2 / integralU2 if integralU2 != 0 else 0
-                    #print("h_depth:", H_depth)
+                    # print("h_depth:", H_depth)
 ##########################################################################
 ########################################## 计算深度平均的TKE BUDGET #############
 
                     # depth-averaged turbulent generation
 
-                    add_P_k = P_k[1:max_ya_crossing_index] + P_k[: max_ya_crossing_index-1] * differences[1:max_ya_crossing_index] / 2
+                    add_P_k = P_k[1:max_ya_crossing_index] + P_k[: max_ya_crossing_index -
+                                                                 1] * differences[1:max_ya_crossing_index] / 2
                     integral_P_k = np.sum(add_P_k)
                     p_k_average = integral_P_k / H if H != 0 else 0
-                    #print('difference:', differences)
+                    # print('difference:', differences)
 
                     # transport turbulent ##
                     add_T_k = laplacian_k[1:max_ya_crossing_index] + \
