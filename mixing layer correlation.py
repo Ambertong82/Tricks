@@ -4,7 +4,7 @@ from scipy.optimize import curve_fit
 import pandas as pd
 
 # 1. 生成示例数据（替换为你的实际数据）
-file1_path = "/home/amber/postpro/mixinglayerEuler/case230427_4_output_59.csv"
+file1_path = "/home/amber/postpro/mixinglayerEuler/case230427_4_output_49.csv"
 # file1_path = "/home/amber/postpro/case090429_1_1e5.csv"
 df1 = pd.read_csv(file1_path)
 # 2. 计算波动成分
@@ -22,10 +22,10 @@ rho1 = alpha * rhos + (1 - alpha) * rho
 g = 9.81 * (rho1 - rho) / rho
 
 xdimless = (front - xori)/ H
-print(f"xdimless={xdimless}")
+#print(f"xdimless={xdimless}")
 
 # 只取 xdimless 在 [2, 4] 区间的数据
-fit_mask = (xdimless >= 1.6) & (xdimless <= 3.0)
+fit_mask = (xdimless >= 1) & (xdimless <= 2)
 x_fit = xdimless[fit_mask]
 y_fit = uori[fit_mask]
 
@@ -57,7 +57,7 @@ if len(x_fit) > 1:
 
 # 原始数据
 mask = xdimless > 0
-plt.plot(xdimless[mask], uori[mask], label='U.a')
+plt.plot(xdimless[mask], uori[mask], marker='o',label='U.a')
 plt.xlabel('$(x_{front}-x)/H$')
 plt.ylabel('$\Delta U$')
 plt.title('Mixing Layer Correlation at t = {:.2f} s'.format(t.iloc[0]))
