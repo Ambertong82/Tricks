@@ -148,7 +148,7 @@ def detect_sign_changes(omega_z, y_values, x_values, ua_values, ub_values, time_
                     # ========== 寻找匹配的正→负点 ==========
                     for j, next_idx in enumerate(sign_changes[i+1:], start=i+1):
                         if signs[next_idx-1] > 0 and signs[next_idx] < 0 and current_y[next_idx] < 0.2:
-                            # 检查后续5个点是否为非正
+                            # 检查后续2个点是否为非正
                             end_neg = min(next_idx + 2, len(current_omega))
                             next_five_neg = current_omega[next_idx:end_neg]
                             
@@ -254,10 +254,9 @@ def plot_omegaz_at_x(df, x_target):
     plt.title(f'omegaz at x={x_target}')
     plt.grid(True)
     plt.show()    
-
 def main():
     # 准备文件列表
-    input_files = sorted(RAW_DATA_DIR.glob(f"{FILE_PREFIX}_59.csv"))
+    input_files = sorted(RAW_DATA_DIR.glob(f"{FILE_PREFIX}_*.csv"))
     
     # 创建输出目录
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
