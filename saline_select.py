@@ -8,7 +8,7 @@ H = 0.3
 ts = 1.86
 ub = 0.08
 BASE_PATH = '/home/amber/postpro/'
-FILE_PREFIX = 'case0704_2Bon'  # 修改这里即可自动更新文件名
+FILE_PREFIX = 'case0704_4'  # 修改这里即可自动更新文件名
 
 # 动态生成A的数字标识（处理分数和浮点数）
 
@@ -27,12 +27,19 @@ def get_output_files():
         'yy': f'x{a_id}xyy.csv',
         'ua': f'x{a_id}xua.csv',
         'uadimless': f'x{a_id}xuadimless.csv',
-        'reynolds': f'x{a_id}xReynolds.csv',
+        'reynolds11': f'x{a_id}xReynolds11.csv',
+        'reynolds12': f'x{a_id}xReynolds12.csv',
+        'reynolds22': f'x{a_id}xReynolds22.csv',
         'gradUb': f'x{a_id}xdudy.csv',
         'alpha': f'x{a_id}xALPHA.csv',
         'shearstress': f'x{a_id}xShearStress.csv',
         'omegaz': f'x{a_id}xomegaz.csv',
         'k': f'x{a_id}xk.csv',
+        'Rig': f'x{a_id}xRig.csv',
+        'production': f'x{a_id}xProduction.csv',
+        'dissipation': f'x{a_id}xDissipation.csv',
+        'omega': f'x{a_id}xomega.csv',
+
     }
 
 
@@ -40,37 +47,61 @@ def calculate_derived_values(
         df,
         x,
         yvalue,
-        c_value,
-        
+        alpha,
+        grad_dudx,
+        grad_dvdy,
         grad_dvdx,
         grad_dudy,
-        nutb):
+        kinetic_energy,
+        u,
+        omega,
+        grad_alpha1,
+        grad_alpha2,
+        nutb,
+        alpha_dy):
     """计算衍生量"""
-    rho_mix = c_value * 200 + 1000
+    rho_mix = alpha * 200 + 1000
     drhody = np.gradient(rho_mix, yvalue)
-    dalphady = np.gradient(c_value, yvalue)
+    dalphady = np.gradient(alpha, yvalue)
 
     with np.errstate(divide='ignore', invalid='ignore'):
-        Rig = -9.81 * drhody / (1000 * grad_dudy**2)
+        Rig = -9.81 * alpha_dy * 2217 / (1000 * grad_dudy**2)
         Rigg = dalphady / (grad_dudy**2)
         Rig = np.nan_to_num(Rig, nan=0.0, posinf=0.0, neginf=0.0)
         Rigg = np.nan_to_num(Rigg, nan=0.0, posinf=0.0, neginf=0.0)
 
     omegaz = grad_dvdx - grad_dudy
-    reynolds = nutb * (grad_dudy + grad_dvdx)*1000
-    shearstress = grad_dudy+grad_dvdx
+    reynolds12 = nutb * (grad_dudy + grad_dvdx)*1000
+    reynolds11 = nutb * (grad_dudx + grad_dvdx-2/3*kinetic_energy)*1000
+    reynolds22 = nutb * (grad_dvdy + grad_dvdy-2/3*kinetic_energy)*1000
     center = (yvalue[1:] - yvalue[:-1]) / 2 + yvalue[:-1]
     yplus = np.sqrt(1e-6 * grad_dudy[0]) * center / 1e-6
+    shearstress = grad_dudy+grad_dvdx
+    production = (2217*alpha+1000)*nutb * (2*grad_dudx**2 + 2*grad_dvdy**2+(grad_dvdx+grad_dudy)**2) 
+    production_dudx = alpha*1000*nutb * (2*grad_dudx**2)
+    production_dvdy = alpha*1000*nutb * (2*grad_dvdy**2)-alpha*2/3*1000*kinetic_energy *grad_dvdy
+    tauxx = 1e-3*grad_dudx*2
+    tauxy = 1e-3*(grad_dudy+grad_dvdx)
+    tauyy = 1e-3*grad_dvdy*2
+    seoxx = grad_alpha1**2/(1-alpha)
+    seoxy = (grad_alpha1*grad_alpha2)/(1-alpha)
+    seoyy = grad_alpha2**2/(1-alpha)
+    buoyancy = nutb*(tauxx*seoxx + 2*tauxy*seoxy + tauyy*seoyy)
+    dissipation = -(2217*alpha+1000)*0.09*kinetic_energy*omega
 
     return {
         'Rig': Rig.tolist(),
         'Rigg': Rigg.tolist(),
         'omegaz': omegaz.tolist(),
-        'reynolds': reynolds.tolist(),
+        'reynolds12': reynolds12.tolist(),
+        'reynolds11': reynolds11.tolist(),
+        'reynolds22': reynolds22.tolist(),
+        'production': production.tolist(),
         'shearstress': shearstress.tolist(),
         'yplus': yplus.tolist(),
         'gradUb': grad_dudy.tolist(),
-        'alpha': c_value.tolist()
+        'alpha': alpha.tolist(),
+        'dissipation': dissipation.tolist(),
     }
 
 
@@ -92,19 +123,38 @@ def process_file(file):
     # 提取基础数据
     mask = (df['Points:0'] == x) & (df['Points:2'] == 0)
     yvalue = df.loc[mask, 'Points:1'].values
-    uvalue = df.loc[mask, 'U:0'].values
-    uadimless = uvalue / ub  # 无量纲化
+    u = df.loc[mask, 'U:0'].values
+    uadimless = u / ub  # 无量纲化
     grad_dvdx = df.loc[mask, 'grad(U):1'].values
     grad_dudy = df.loc[mask, 'grad(U):3'].values
-    c_value = df.loc[mask, 'alpha.saline'].values
+    alpha = df.loc[mask, 'alpha.saline'].values
     k_value = df.loc[mask, 'k'].values
-    
-
     nutb = df.loc[mask, 'nut'].values
+    alpha_dy = df.loc[mask, 'grad(alpha.saline):1'].values
+    grad_dudx = df.loc[mask, 'grad(U):0'].values
+    grad_dvdy = df.loc[mask, 'grad(U):2'].values
+    kinetic_energy = df.loc[mask, 'k'].values
+    omega = df.loc[mask, 'omega'].values
+    grad_alpha1 = df.loc[mask, 'grad(alpha.saline):0'].values
+    grad_alpha2 = df.loc[mask, 'grad(alpha.saline):1'].values
 
     # 计算衍生量
     derived = calculate_derived_values(
-        df, x, yvalue, c_value, grad_dvdx, grad_dudy, nutb)
+        df,
+        x,
+        yvalue,
+        alpha,
+        grad_dudx,
+        grad_dvdy,
+        grad_dvdx,
+        grad_dudy,
+        kinetic_energy,
+        u,
+        omega,
+        grad_alpha1,
+        grad_alpha2,
+        nutb,
+        alpha_dy)
 
     return {
         'time': time,
@@ -112,8 +162,10 @@ def process_file(file):
         'x': x,
         'uadimless': uadimless.tolist(),
         'yy': yvalue.tolist(),
-        'ua': uvalue.tolist(), 
+        'ua': u.tolist(), 
         'k': k_value.tolist(), 
+        'alphady': alpha_dy.tolist(),
+        'omega':omega.tolist(),
         **derived
     }
 
@@ -121,6 +173,7 @@ def process_file(file):
 def save_data(data_dict):
     """保存数据到CSV文件（带自动匹配timedimless和转置）"""
     OUTPUT_FILES = get_output_files()
+    OUTPUT_DIR = '/home/amber/postpro/Marino/'
     
     for key, filename in OUTPUT_FILES.items():
         data = []
@@ -141,7 +194,7 @@ def save_data(data_dict):
         
         # 保存文件（无表头）
         df.to_csv(
-            f"{BASE_PATH}{FILE_PREFIX}_{filename}",
+            f"{OUTPUT_DIR}{FILE_PREFIX}_{filename}",
             index=False,
             header=False
         )

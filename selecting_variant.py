@@ -3,7 +3,8 @@ import numpy as np
 from fractions import Fraction
 
 # 常量定义
-A = 1 / 4  # 修改这里即可自动更新文件名（支持分数/浮点数）
+A = 1/2  # 修改这里即可自动更新文件名（支持分数/浮点数）
+B = 1e-5
 BASE_PATH = '/home/amber/postpro/'
 FILE_PREFIX = 'case230427_4'  # 修改这里即可自动更新文件名
 
@@ -19,7 +20,7 @@ def get_a_identifier(a_value):
 
 
 def get_output_files():
-    a_id = get_a_identifier(A)  # 例如A=10/12→"1012"
+    a_id = get_a_identifier(A) # 例如A=10/12→"1012"
     return {
         'yy': f'x{a_id}xyy.csv',
         'ua': f'x{a_id}xua.csv',
@@ -42,6 +43,11 @@ def get_output_files():
         'grad_dudx': f'x{a_id}xGrad_dudx.csv',
         'grad_dvdy': f'x{a_id}xGrad_dvdy.csv',
         'dragpart': f'x{a_id}xDragPart.csv',
+        'buoyancy': f'x{a_id}xBuoyancy.csv',
+        'dissipation': f'x{a_id}xDissipation.csv',
+        'uay': f'x{a_id}xuay.csv',
+        'uby': f'x{a_id}xuby.csv',
+        'ke_dimless': f'x{a_id}xke_dimless.csv',
     }
 
 
@@ -62,7 +68,10 @@ def calculate_derived_values(
         uavalueyy,
         ubvalueyy,
         grad_alpha1,
-        grad_alpha2):
+        grad_alpha2,
+        grad_beta1,
+        grad_beta2,
+        omega):
     """计算衍生量"""
     rho_mix = alpha * 2217 + 1000
     drhody = np.gradient(rho_mix, yvalue)
@@ -70,7 +79,7 @@ def calculate_derived_values(
 
     with np.errstate(divide='ignore', invalid='ignore'):
         Rig = -9.81 * drhody / (1000 * grad_dudy**2)
-        Rigg = dalphady / (grad_dudy**2)
+        Rigg =  -9.81*2217*grad_alpha2 / (1000 * grad_dudy**2)
         Rig = np.nan_to_num(Rig, nan=0.0, posinf=0.0, neginf=0.0)
         Rigg = np.nan_to_num(Rigg, nan=0.0, posinf=0.0, neginf=0.0)
 
@@ -81,11 +90,18 @@ def calculate_derived_values(
     center = (yvalue[1:] - yvalue[:-1]) / 2 + yvalue[:-1]
     yplus = np.sqrt(1e-6 * grad_dudy[0]) * center / 1e-6
     shearstress = grad_dudy+grad_dvdx
-    production = alpha*1000*nutb * (2*grad_dudx**2 + 2*grad_dvdy**2+(grad_dvdx+grad_dudy)**2) - alpha*2/3*1000*kinetic_energy *grad_dvdy
-    - alpha*2/3*1000*kinetic_energy *grad_dudx
-    production_dudx = alpha*1000*nutb * (2*grad_dudx**2)-alpha*2/3*1000*kinetic_energy *grad_dudx
-    production_dvdy = alpha*1000*nutb * (2*grad_dvdy**2)-alpha*2/3*1000*kinetic_energy *grad_dvdy
+    production = alpha*1000*nutb * (2*grad_dudx**2 + 2*grad_dvdy**2+(grad_dvdx+grad_dudy)**2) 
+    production_dudx = alpha*1000*nutb * (2*grad_dudx**2)- alpha*2/3*1000*kinetic_energy *grad_dudx
+    production_dvdy = alpha*1000*nutb * (2*grad_dvdy**2)- alpha*2/3*1000*kinetic_energy *grad_dvdy
     dragpart = gamma * ((ubvalue-uavalue)*grad_alpha1 + (ubvalueyy-uavalueyy)*grad_alpha2)* nutb /(1-alpha)
+    tauxx = 1e-3*grad_dudx*2
+    tauxy = 1e-3*(grad_dudy+grad_dvdx)
+    tauyy = 1e-3*grad_dvdy*2
+    seoxx = grad_beta1**2/(1-alpha)
+    seoxy = (grad_beta1*grad_beta2)/(1-alpha)
+    seoyy = grad_beta2**2/(1-alpha)
+    buoyancy = nutb*(tauxx*seoxx + 2*tauxy*seoxy + tauyy*seoyy)
+    dissipation = -(1-alpha)*1000*0.09*kinetic_energy*omega
 
     return {
         'Rig': Rig.tolist(),
@@ -103,13 +119,15 @@ def calculate_derived_values(
         'production_dudx': production_dudx.tolist(),
         'production_dvdy': production_dvdy.tolist(),
         'dragpart': dragpart.tolist(),
+        'buoyancy': buoyancy.tolist(),
+        'dissipation': dissipation.tolist(),
     }
 
 
 def process_file(file):
     """处理单个文件"""
     df = pd.read_csv(file)
-    filtered_df = df[(df['alpha.a'] > 0.00001) & (df['Points:1'] > 0)]
+    filtered_df = df[(df['alpha.a'] > 1e-5) & (df['Points:1'] > 0)]
 
     if len(filtered_df) <= 1:
         return None
@@ -138,16 +156,20 @@ def process_file(file):
     grad_dvdy = df.loc[mask, 'grad(U.b):4'].values
     nutb = df.loc[mask, 'nut.b'].values
     kinetic_energy = df.loc[mask, 'k.b'].values
+    max_ke = kinetic_energy.max()
+    ke_dimless = kinetic_energy / max_ke if max_ke != 0 else kinetic_energy
     gamma = df.loc[mask, 'K'].values
     grad_alpha1 = df.loc[mask, 'grad(alpha.a):0'].values
     grad_alpha2 = df.loc[mask, 'grad(alpha.a):1'].values
-    grad_beta = df.loc[mask, 'grad(alpha.b):0'].values
+    grad_beta1 = df.loc[mask, 'grad(alpha.b):0'].values
+    grad_beta2 = df.loc[mask, 'grad(alpha.b):1'].values
+    omega = df.loc[mask, 'omega.b'].values
     
 
     # 计算衍生量
     derived = calculate_derived_values(
         df, x, yvalue, alpha,  kinetic_energy, gamma, grad_dudx, grad_dvdx, grad_dudy, grad_dvdy,nutb, 
-        uavalue, ubvalue,uavalueyy, ubvalueyy, grad_alpha1, grad_alpha2)
+        uavalue, ubvalue,uavalueyy, ubvalueyy, grad_alpha1, grad_alpha2, grad_beta1, grad_beta2,omega)
 
     return {
         'time': time,
@@ -161,6 +183,9 @@ def process_file(file):
         'kinetic_energy': kinetic_energy.tolist(),
         'grad_dvdy': grad_dvdy.tolist(),
         'grad_dudx': grad_dudx.tolist(),
+        'uay': uavalueyy.tolist(),
+        'uby': ubvalueyy.tolist(),
+        'ke_dimless': ke_dimless.tolist(),
         **derived
     }
 
