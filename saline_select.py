@@ -3,7 +3,7 @@ import numpy as np
 from fractions import Fraction
 
 # 常量定义
-A = 1 / 4  # 修改这里即可自动更新文件名（支持分数/浮点数）
+A = 1 / 3  # 修改这里即可自动更新文件名（支持分数/浮点数）
 H = 0.3
 ts = 1.86
 ub = 0.08
@@ -39,6 +39,8 @@ def get_output_files():
         'production': f'x{a_id}xProduction.csv',
         'dissipation': f'x{a_id}xDissipation.csv',
         'omega': f'x{a_id}xomega.csv',
+        'grad_dudy': f'x{a_id}xgrad_dudy.csv',
+        'grad_dvdx': f'x{a_id}xgrad_dvdx.csv',
 
     }
 
@@ -88,6 +90,7 @@ def calculate_derived_values(
     seoyy = grad_alpha2**2/(1-alpha)
     buoyancy = nutb*(tauxx*seoxx + 2*tauxy*seoxy + tauyy*seoyy)
     dissipation = -(2217*alpha+1000)*0.09*kinetic_energy*omega
+    
 
     return {
         'Rig': Rig.tolist(),
@@ -102,6 +105,8 @@ def calculate_derived_values(
         'gradUb': grad_dudy.tolist(),
         'alpha': alpha.tolist(),
         'dissipation': dissipation.tolist(),
+        'grad_dudy': grad_dudy.tolist(),
+        'grad_dvdx': grad_dvdx.tolist(),
     }
 
 

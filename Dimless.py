@@ -15,7 +15,7 @@ nu = 1e-6  # Kinematic viscosity
 
 # File list generation
 file_list = [
-    f'/home/amber/postpro/rawdata/case230427_4_{i}.csv' for i in range(19, 40)]
+    f'/home/amber/postpro/rawdata/case230427_4_{i}.csv' for i in range(1, 79, 2)]
 all_results = pd.DataFrame()
 x_values = []  # Store x values for gradient calculation
 h_values = []  # Store h values for gradient calculation
@@ -30,6 +30,7 @@ for i, file in enumerate(file_list):
 
     if len(filtered_df) > 1:
         max_x_value = filtered_df['Points:0'].max()  # Directly get max x value
+        #xprint(max_x_value)
 
         for xx in x0:
             if 0 < xx <= max_x_value and xx not in visited_xx:
@@ -55,8 +56,8 @@ for i, file in enumerate(file_list):
                     grad_dudx = point_data['grad(U.b):0']
                     grad_dvdy = point_data['grad(U.b):4']
                     nut_values = point_data['nut.b']
-                    grad_dkdx = point_data['grad(k.b):0']
-                    grad_dkdy = point_data['grad(k.b):1']
+                    #grad_dkdx = point_data['grad(k.b):0']
+                    #grad_dkdy = point_data['grad(k.b):1']
                     omega_values = point_data['omega.b']
                     grad_dalphadx = point_data['grad(alpha.a):0']
                     grad_dalphady = point_data['grad(alpha.a):1']
@@ -74,22 +75,22 @@ for i, file in enumerate(file_list):
                     P_k = 2 * nut_values * Sij_Sij * 1000 * (1 - alpha_values)
 
                     # calculate laplacian of k transportation
-                    P1 = grad_dkdx * alpha_values * rho_0 * nut_values * alphaKomega
-                    P2 = grad_dkdy * alpha_values * rho_0 * nut_values * alphaKomega
-                    d2kdx2 = np.gradient(P1, 0.008, edge_order=2)
-                    d2kdy2 = np.gradient(P2, ya_values, edge_order=2)
-                    laplacian_k = d2kdx2 + d2kdy2
+                    # P1 = grad_dkdx * alpha_values * rho_0 * nut_values * alphaKomega
+                    # P2 = grad_dkdy * alpha_values * rho_0 * nut_values * alphaKomega
+                    # d2kdx2 = np.gradient(P1, 0.008, edge_order=2)
+                    # d2kdy2 = np.gradient(P2, ya_values, edge_order=2)
+                    # laplacian_k = d2kdx2 + d2kdy2
 
                     # calculate dissipation rate
                     epsilon_alpharho = Cmu * kb_values * \
                         omega_values * (1 - alpha_values) * rho_0
 
                     # calulate turbulent diffusion flux
-                    D1 = grad_dkdx * alpha_values * rho_0 * nu
-                    D2 = grad_dkdy * alpha_values * rho_0 * nu
-                    Dd2kdx2 = np.gradient(D1, 0.008, edge_order=2)
-                    Dd2kdy2 = np.gradient(D2, ya_values, edge_order=2)
-                    D_k = Dd2kdx2 + Dd2kdy2
+                    # D1 = grad_dkdx * alpha_values * rho_0 * nu
+                    # D2 = grad_dkdy * alpha_values * rho_0 * nu
+                    # Dd2kdx2 = np.gradient(D1, 0.008, edge_order=2)
+                    # Dd2kdy2 = np.gradient(D2, ya_values, edge_order=2)
+                    # D_k = Dd2kdx2 + Dd2kdy2
 
                     # calculate first part of drag force
                     G11 = gamma_values * \
@@ -159,8 +160,8 @@ for i, file in enumerate(file_list):
                     differences[0] = 0
 
                     #### Mass Flux height #####
-                    # 确保 alpha_values 非负  # 计算质量通量 alpha*v
-                    ua_alpha_values = abs(ua_values * alpha_values)
+                    # 确保 alpha_values 非负  # 计算质量通量 alpha*v 如果是计算通量，那么就不应该是非负
+                    ua_alpha_values = (ua_values * alpha_values)
                     ua_values_abs = (ua_values)
                     # if index_of_max_ya <= 1 or index_of_max_ya > len(ua_alpha_values):
                     #     print(f"Invalid index_of_max_ya: {index_of_max_ya}")
@@ -209,16 +210,16 @@ for i, file in enumerate(file_list):
                     # print('difference:', differences)
 
                     # transport turbulent ##
-                    add_T_k = laplacian_k[1:max_ya_crossing_index] + \
-                        laplacian_k[:max_ya_crossing_index - 1] * differences[1:max_ya_crossing_index] / 2
-                    integral_T_k = np.sum(add_T_k)
-                    T_k_average = integral_T_k / H if H != 0 else 0
+                    # add_T_k = laplacian_k[1:max_ya_crossing_index] + \
+                    #     laplacian_k[:max_ya_crossing_index - 1] * differences[1:max_ya_crossing_index] / 2
+                    # integral_T_k = np.sum(add_T_k)
+                    # T_k_average = integral_T_k / H if H != 0 else 0
 
                     # diffusion turbulent ##
-                    add_D_k = D_k[1:max_ya_crossing_index] + D_k[:max_ya_crossing_index -
-                                                                 1] * differences[1:max_ya_crossing_index] / 2
-                    integral_D_k = np.sum(add_D_k)
-                    D_k_average = integral_D_k / H if H != 0 else 0
+                    # add_D_k = D_k[1:max_ya_crossing_index] + D_k[:max_ya_crossing_index -
+                    #                                              1] * differences[1:max_ya_crossing_index] / 2
+                    # integral_D_k = np.sum(add_D_k)
+                    # D_k_average = integral_D_k / H if H != 0 else 0
 
                     # turbulent dissipation rate
                     add_epsilon = epsilon_alpharho[1:max_ya_crossing_index] + \
@@ -303,8 +304,8 @@ for i, file in enumerate(file_list):
                             'h_ke': [h_ke],
                             'Cd': [Cd],
                             'p_k_average': [p_k_average],
-                            'T_k_average': [T_k_average],
-                            'D_k_average': [D_k_average],
+                            # 'T_k_average': [T_k_average],
+                            # 'D_k_average': [D_k_average],
                             'epsilon_average': [epsilon_average],
                             'G_average': [G_average],
                             'G2_average': [G2_average],
@@ -353,9 +354,9 @@ for i, file in enumerate(file_list):
                 'Cd',
                 'duhdx',
                 'E',
-                'p_k_average',
-                'T_k_average',
-                'D_k_average',
+                # 'p_k_average',
+                # 'T_k_average',
+                # 'D_k_average',
                 'epsilon_average',
                 'G_average',
                 'G2_average',
