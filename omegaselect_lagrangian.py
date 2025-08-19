@@ -139,21 +139,21 @@ def find_sign_changes_and_values(
 
 
 # 使用示例
-# if __name__ == "__main__":
-#     file1_path = "/home/amber/postpro/case0704_4_x14xomegaz.csv"  # 替换为你的第一个CSV文件路径
-#     file2_path = "/home/amber/postpro/case0704_4_x14xyy.csv"  # 替换为你的第二个CSV文件路径
-#     file3_path = "/home/amber/postpro/case0704_4_x14xua.csv"  # 替换为你的第三个CSV文件路径
-#     output_path = "/home/amber/postpro/mixinglayer/output_results_marino_14.csv"  # 替换为你的输出CSV文件路径
-#     find_sign_changes_and_values(
-#         file1_path,
-#         file2_path,
-#         file3_path,
-#         output_path)
+if __name__ == "__main__":
+    file1_path = "/home/amber/postpro/case0704_4_x14xomegaz.csv"  # 替换为你的第一个CSV文件路径
+    file2_path = "/home/amber/postpro/case0704_4_x14xyy.csv"  # 替换为你的第二个CSV文件路径
+    file3_path = "/home/amber/postpro/case0704_4_x14xua.csv"  # 替换为你的第三个CSV文件路径
+    output_path = "/home/amber/postpro/mixinglayer/output_results_marino_14.csv"  # 替换为你的输出CSV文件路径
+    find_sign_changes_and_values(
+        file1_path,
+        file2_path,
+        file3_path,
+        output_path)
 
 # 使用示例
-if __name__ == "__main__":
-    file1_path = "/home/amber/postpro/case230427_4_x14xomegaz.csv"  # 替换为你的第一个CSV文件路径
-    file2_path = "/home/amber/postpro/case230427_4_x14xyy.csv"  # 替换为你的第二个CSV文件路径
-    file3_path = "/home/amber/postpro/case230427_4_x14xub.csv"  # 替换为你的第三个CSV文件路径
-    output_path = "/home/amber/postpro/mixinglayer/output_results_23_14.csv"  # 替换为你的输出CSV文件路径
-    find_sign_changes_and_values(file1_path, file2_path, file3_path, output_path)
+# if __name__ == "__main__":
+#     file1_path = "/home/amber/postpro/case230427_4_x12xomegaz.csv"  # 替换为你的第一个CSV文件路径
+#     file2_path = "/home/amber/postpro/case230427_4_x12xyy.csv"  # 替换为你的第二个CSV文件路径
+#     file3_path = "/home/amber/postpro/case230427_4_x12xub.csv"  # 替换为你的第三个CSV文件路径
+#     output_path = "/home/amber/postpro/mixinglayer/output_results_23_12.csv"  # 替换为你的输出CSV文件路径
+#     find_sign_changes_and_values(file1_path, file2_path, file3_path, output_path)

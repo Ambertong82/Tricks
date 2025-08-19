@@ -48,13 +48,6 @@ def get_output_files():
         'uay': f'x{a_id}xuay.csv',
         'uby': f'x{a_id}xuby.csv',
         'ke_dimless': f'x{a_id}xke_dimless.csv',
-        'dudy': f'x{a_id}xdu_dy.csv',
-        'dvdx': f'x{a_id}xdv_dx.csv',
-        'dalphady': f'x{a_id}xgrad_alphady.csv',
-        'reynolds12Total': f'x{a_id}xReynolds12Total.csv',
-        'U': f'x{a_id}xU.csv',
-        'H_alpha': f'x{a_id}xH_alpha.csv',  # 体积分数加权平均
-        'H_depth': f'x{a_id}xH_depth.csv',  # 深度加权平均
     }
 
 
@@ -69,8 +62,6 @@ def calculate_derived_values(
         grad_dvdx,
         grad_dudy,
         grad_dvdy,
-        grad_duady,
-        grad_dvadx,
         nutb,
         uavalue,
         ubvalue,
@@ -96,7 +87,6 @@ def calculate_derived_values(
     reynolds12 = nutb * (grad_dudy + grad_dvdx)*1000
     reynolds11 = nutb * (grad_dudx + grad_dvdx-2/3*kinetic_energy)*1000
     reynolds22 = nutb * (grad_dvdy + grad_dvdy-2/3*kinetic_energy)*1000
-    reynolds12Total = (1-alpha) * nutb * (grad_dudy + grad_dvdx)*1000 + alpha * nutb * (grad_duady + grad_dvadx)*3217
     center = (yvalue[1:] - yvalue[:-1]) / 2 + yvalue[:-1]
     yplus = np.sqrt(1e-6 * grad_dudy[0]) * center / 1e-6
     shearstress = grad_dudy+grad_dvdx
@@ -113,53 +103,6 @@ def calculate_derived_values(
     buoyancy = nutb*(tauxx*seoxx + 2*tauxy*seoxy + tauyy*seoyy)
     dissipation = -(1-alpha)*1000*0.09*kinetic_energy*omega
 
-
-
-    # 初始化默认积分上限（原逻辑）
-    #max_ya_crossing_index = valid_ya.idxmax() if valid_mask.any() else len(uavalue) - 1
-
-     # 寻找速度正负交界点
-    sign_changes = np.where(np.diff(np.sign(uavalue)))[0]
-    if len(sign_changes) > 0:
-        positive_to_negative = [
-            i for i in sign_changes
-            if (i + 1 < len(uavalue))
-            and (uavalue[i] > 0)
-            and (uavalue[i + 1] < 0)
-        ]
-        if len(positive_to_negative) > 0:
-                crossing_ya = yvalue[positive_to_negative]
-                max_ya_crossing_index = positive_to_negative[np.argmax(
-                crossing_ya)]
-
-    # 修正：yvalue是numpy数组，没有diff方法，使用np.diff
-    differences = np.diff(yvalue)  # 计算相邻y的差值
-
-    
-    # 考虑体积分数参与运算
-    ua_alpha_values = (uavalue * alpha)
-    sum1 = (ua_alpha_values[1:max_ya_crossing_index] + \
-                            ua_alpha_values[:max_ya_crossing_index - 1]) * differences[1:max_ya_crossing_index] / 2
-    integral = np.sum(sum1)
-
-    alpha_ua_squre = (uavalue * alpha)**2
-    addc = (alpha_ua_squre[:max_ya_crossing_index - 1] + \
-                            alpha_ua_squre[1:max_ya_crossing_index]) * differences[1:max_ya_crossing_index] / 2
-    integral2 = np.sum(addc)
-    H_alpha = integral**2 / integral2 if integral2 != 0 else 0    
-
-    
-    # 不考虑体积分数参与平均运算
-    sum2 = (uavalue[1:max_ya_crossing_index] + uavalue[:max_ya_crossing_index-1]) * differences[1:max_ya_crossing_index] / 2
-    integralU = np.sum(sum2)
-
-    ua_square = uavalue**2
-    addU = (ua_square[:max_ya_crossing_index-1] + ua_square[1:max_ya_crossing_index]) * differences[1:max_ya_crossing_index] / 2
-    integralU2 = np.sum(addU)
-    
-    U = integralU2 / integralU if integralU != 0 else 0                
-    H_depth = integralU**2 / integralU2 if integralU2 != 0 else 0
-                    
     return {
         'Rig': Rig.tolist(),
         'Rigg': Rigg.tolist(),
@@ -178,13 +121,6 @@ def calculate_derived_values(
         'dragpart': dragpart.tolist(),
         'buoyancy': buoyancy.tolist(),
         'dissipation': dissipation.tolist(),
-        'dudy': grad_dudy.tolist(),
-        'dvdx': grad_dvdx.tolist(),
-        'dalphady': grad_alpha2.tolist(),
-        'reynolds12Total': reynolds12Total.tolist(),
-        'U': U.tolist(), # 平均速度
-        'H_alpha': H_alpha.tolist(),  # 体积分数加权平均
-        'H_depth': H_depth.tolist(),  # 深度加权平均
     }
 
 
@@ -218,8 +154,6 @@ def process_file(file):
     grad_dvdx = df.loc[mask, 'grad(U.b):1'].values
     grad_dudy = df.loc[mask, 'grad(U.b):3'].values
     grad_dvdy = df.loc[mask, 'grad(U.b):4'].values
-    grad_dvadx = df.loc[mask, 'grad(U.a):1'].values
-    grad_duady = df.loc[mask, 'grad(U.a):3'].values
     nutb = df.loc[mask, 'nut.b'].values
     kinetic_energy = df.loc[mask, 'k.b'].values
     max_ke = kinetic_energy.max()
@@ -230,14 +164,11 @@ def process_file(file):
     grad_beta1 = df.loc[mask, 'grad(alpha.b):0'].values
     grad_beta2 = df.loc[mask, 'grad(alpha.b):1'].values
     omega = df.loc[mask, 'omega.b'].values
-
-
-                   
     
 
     # 计算衍生量
     derived = calculate_derived_values(
-        df, x, yvalue, alpha,  kinetic_energy, gamma, grad_dudx, grad_dvdx, grad_dudy, grad_dvdy, grad_duady, grad_dvadx,nutb, 
+        df, x, yvalue, alpha,  kinetic_energy, gamma, grad_dudx, grad_dvdx, grad_dudy, grad_dvdy,nutb, 
         uavalue, ubvalue,uavalueyy, ubvalueyy, grad_alpha1, grad_alpha2, grad_beta1, grad_beta2,omega)
 
     return {
@@ -252,8 +183,6 @@ def process_file(file):
         'kinetic_energy': kinetic_energy.tolist(),
         'grad_dvdy': grad_dvdy.tolist(),
         'grad_dudx': grad_dudx.tolist(),
-        'grad_dvadx': grad_dvadx.tolist(),
-        'grad_duady': grad_duady.tolist(),
         'uay': uavalueyy.tolist(),
         'uby': ubvalueyy.tolist(),
         'ke_dimless': ke_dimless.tolist(),
@@ -275,11 +204,9 @@ def save_data(data_dict):
         for item in data_dict:
             # 选择时间列（timedimless或原始time）
             time_col = item['timedimless'] if use_timedimless else item['time']
-            value = item.get(key.replace('timedimless_', ''),[])
-            if not isinstance(value, list):
-                value = [value]
+            
             # 构建数据行（时间 + x + 数据）
-            row = [time_col, item['x']] + value
+            row = [time_col, item['x']] + item.get(key.replace('timedimless_', ''), [])
             data.append(row)
         
         # 转换为DataFrame并转置
