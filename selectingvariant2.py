@@ -1,23 +1,20 @@
-import pandas as pd
 import numpy as np
+import pandas as pd
+import os
+import fluidfoam
 from fractions import Fraction
 
 # 常量定义
-A = 1/2  # 修改这里即可自动更新文件名（支持分数/浮点数）
+A = 1/3  # 修改这里即可自动更新文件名（支持分数/浮点数）
 B = 1e-5
-BASE_PATH = '/home/amber/postpro/'
-FILE_PREFIX = 'case230427_4'  # 修改这里即可自动更新文件名
+y_min = 0
+alpha_threshold = 1e-5
 
-# 动态生成A的数字标识（处理分数和浮点数）
 
 
 def get_a_identifier(a_value):
-    # 将输入转换为分数形式（例如0.25→1/4）
     frac = Fraction(a_value).limit_denominator()
-    return f"{frac.numerator}{frac.denominator}"  # 拼接分子分母
-
-# 动态生成输出文件名
-
+    return f"{frac.numerator}{frac.denominator}"
 
 def get_output_files():
     a_id = get_a_identifier(A) # 例如A=10/12→"1012"
@@ -51,27 +48,9 @@ def get_output_files():
     }
 
 
-def calculate_derived_values(
-        df,
-        x,
-        yvalue,
-        alpha,
-        kinetic_energy,
-        gamma,
-        grad_dudx,
-        grad_dvdx,
-        grad_dudy,
-        grad_dvdy,
-        nutb,
-        uavalue,
-        ubvalue,
-        uavalueyy,
-        ubvalueyy,
-        grad_alpha1,
-        grad_alpha2,
-        grad_beta1,
-        grad_beta2,
-        omega):
+def calculate_derived_values(yvalue, alpha, kinetic_energy, gamma, grad_dudx, grad_dvdx, 
+                           grad_dudy, grad_dvdy, nutb, uavalue, ubvalue, uavalueyy, 
+                           ubvalueyy, grad_alpha1, grad_alpha2, grad_beta1, grad_beta2, omega):
     """计算衍生量"""
     rho_mix = alpha * 2217 + 1000
     drhody = np.gradient(rho_mix, yvalue)
@@ -79,7 +58,7 @@ def calculate_derived_values(
 
     with np.errstate(divide='ignore', invalid='ignore'):
         Rig = -9.81 * drhody / (1000 * grad_dudy**2)
-        Rigg =  -9.81*2217*grad_alpha2 / (1000 * grad_dudy**2)
+        Rigg = -9.81*2217*grad_alpha2 / (1000 * grad_dudy**2)
         Rig = np.nan_to_num(Rig, nan=0.0, posinf=0.0, neginf=0.0)
         Rigg = np.nan_to_num(Rigg, nan=0.0, posinf=0.0, neginf=0.0)
 
@@ -121,65 +100,81 @@ def calculate_derived_values(
         'dragpart': dragpart.tolist(),
         'buoyancy': buoyancy.tolist(),
         'dissipation': dissipation.tolist(),
+    
     }
 
+def process_time_step(sol, time_v, X, Y):
+    """处理单个时间步"""
+    # 读取场数据
+    
+    Ua = fluidfoam.readvector(sol, str(time_v), "U.a")
+    Ub = fluidfoam.readvector(sol, str(time_v), "U.b")
+    alpha = fluidfoam.readscalar(sol, str(time_v), "alpha.a")
+    nutb = fluidfoam.readscalar(sol, str(time_v), "nut.b")
+    kb = fluidfoam.readscalar(sol, str(time_v), "k.b")
+    omegab = fluidfoam.readscalar(sol, str(time_v), "omega.b")
+    grad_Ub = fluidfoam.readtensor(sol, str(time_v), "grad(U.b)")
+    grad_alpha = fluidfoam.readvector(sol, str(time_v), "grad(alpha.a)")
+    grad_beta = fluidfoam.readvector(sol, str(time_v), "grad(alpha.b)")
+    gamma = fluidfoam.readscalar(sol, str(time_v), "K")
 
-def process_file(file):
-    """处理单个文件"""
-    df = pd.read_csv(file)
-    filtered_df = df[(df['alpha.a'] > 1e-5) & (df['Points:1'] > 0)]
-
-    if len(filtered_df) <= 1:
+    # 定位头部位置
+    head_x = None
+    for x in np.unique(X):
+        mask = (X == x) & (Y >= y_min) & (alpha > alpha_threshold)
+        if np.any(mask):
+            head_x = x
+    if head_x is None:
+        print(f"Warning: No head found at t={time_v}")
         return None
 
-    max_point = filtered_df['Points:0'].idxmax()
-    time = filtered_df.loc[max_point, 'Time'] 
-    x = filtered_df.loc[max_point, 'Points:0'] - A * 0.3
-    closest_point = (filtered_df['Points:0'] - x).abs().idxmin()
-    x = filtered_df.loc[closest_point, 'Points:0']
+    # 找到最近的网格点
+    target_x = head_x - A * 0.3
+    unique_x = np.unique(X)
+    closest_x = unique_x[np.argmin(np.abs(unique_x - target_x))]
     
+    # 提取数据
+    mask = np.isclose(X, closest_x, atol=1e-6, rtol=1e-6)
+    if not np.any(mask):
+        print(f"Warning: No points found at x={closest_x:.3f}m for t={time_v}")
+        return None
 
-    # 提取基础数据
-    mask = (df['Points:0'] == x) & (df['Points:2'] == 0)
-    yvalue = df.loc[mask, 'Points:1'].values
-    uavalue = df.loc[mask, 'U.a:0'].values
-    ubvalue = df.loc[mask, 'U.b:0'].values 
-    uavalueyy = df.loc[mask, 'U.a:1'].values
-    ubvalueyy = df.loc[mask, 'U.b:1'].values
-    uavaluedimless = uavalue / 0.27
-    ubvaluedimless = ubvalue / 0.27
-    alpha = df.loc[mask, 'alpha.a'].values
-    #grad_Ub = df.loc[mask, 'grad(U.b):3'].values
-    grad_dudx = df.loc[mask, 'grad(U.b):0'].values
-    grad_dvdx = df.loc[mask, 'grad(U.b):1'].values
-    grad_dudy = df.loc[mask, 'grad(U.b):3'].values
-    grad_dvdy = df.loc[mask, 'grad(U.b):4'].values
-    nutb = df.loc[mask, 'nut.b'].values
-    kinetic_energy = df.loc[mask, 'k.b'].values
+    yvalue = Y[mask]
+    uavalue = Ua[0][mask]
+    ubvalue = Ub[0][mask]
+    uavalueyy = Ua[1][mask]
+    ubvalueyy = Ub[1][mask]
+    alpha_value = alpha[mask]
+    nutb_value = nutb[mask]
+    kinetic_energy = kb[mask]
     max_ke = kinetic_energy.max()
     ke_dimless = kinetic_energy / max_ke if max_ke != 0 else kinetic_energy
-    gamma = df.loc[mask, 'K'].values
-    grad_alpha1 = df.loc[mask, 'grad(alpha.a):0'].values
-    grad_alpha2 = df.loc[mask, 'grad(alpha.a):1'].values
-    grad_beta1 = df.loc[mask, 'grad(alpha.b):0'].values
-    grad_beta2 = df.loc[mask, 'grad(alpha.b):1'].values
-    omega = df.loc[mask, 'omega.b'].values
-    
+    omega_value = omegab[mask]
+    grad_dudx = grad_Ub[0][mask]
+    grad_dudy = grad_Ub[3][mask]
+    grad_dvdx = grad_Ub[1][mask]
+    grad_dvdy = grad_Ub[4][mask]
+    grad_alpha1 = grad_alpha[0][mask]
+    grad_alpha2 = grad_alpha[1][mask]
+    grad_beta1 = grad_beta[0][mask]
+    grad_beta2 = grad_beta[1][mask]
 
     # 计算衍生量
     derived = calculate_derived_values(
-        df, x, yvalue, alpha,  kinetic_energy, gamma, grad_dudx, grad_dvdx, grad_dudy, grad_dvdy,nutb, 
-        uavalue, ubvalue,uavalueyy, ubvalueyy, grad_alpha1, grad_alpha2, grad_beta1, grad_beta2,omega)
+        yvalue, alpha_value, kinetic_energy, gamma[mask], grad_dudx, grad_dvdx,
+        grad_dudy, grad_dvdy, nutb_value, uavalue, ubvalue, uavalueyy, ubvalueyy,
+        grad_alpha1, grad_alpha2, grad_beta1, grad_beta2, omega_value
+    )
 
     return {
-        'time': time,
-        'timedimless': time / 0.56,  # 假设0.28是时间的基准值
-        'x': x,
+        'time': time_v,
+        'timedimless': time_v / 0.56,
+        'x': closest_x,
         'yy': yvalue.tolist(),
         'ua': uavalue.tolist(),
         'ub': ubvalue.tolist(),
-        'uadimless': uavaluedimless.tolist(),
-        'ubdimless': ubvaluedimless.tolist(),
+        'uadimless': (uavalue / 0.27).tolist(),
+        'ubdimless': (ubvalue / 0.27).tolist(),
         'kinetic_energy': kinetic_energy.tolist(),
         'grad_dvdy': grad_dvdy.tolist(),
         'grad_dudx': grad_dudx.tolist(),
@@ -189,12 +184,9 @@ def process_file(file):
         **derived
     }
 
-
-
-def save_data(data_dict):
-    """保存数据到CSV文件（带自动匹配timedimless和转置）"""
+def save_data(data_dict, BASE_PATH, FILE_PREFIX):
+    """保存数据到CSV文件（与原函数相同）"""
     OUTPUT_FILES = get_output_files()
-    
     for key, filename in OUTPUT_FILES.items():
         data = []
         
@@ -218,26 +210,34 @@ def save_data(data_dict):
             index=False,
             header=False
         )
-
+    # ... (保持与原函数相同的实现)
 
 def main():
-    file_list = [
-        f'/home/amber/postpro/rawdata/{FILE_PREFIX}_{i}.csv' for i in range(1, 79, 2)]
-    results = []
+    #sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Middle_particle23/case230427_4"
+    #sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Fine_particle9/case090429_1"
+    #sol="/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Coarse_paticle37/case370428_1"
+    sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Large_particle53/case530826_4"
 
-    for file in file_list:
-        result = process_file(file)
+    X, Y, Z = fluidfoam.readmesh(sol)
+    times = np.arange(1, 14, 1)  # 对应原来的1-79,步长2
+    results = []
+    BASE_PATH = '/home/amber/postpro/selecting_variant/'
+#FILE_PREFIX = 'case230427_4'  # 修改这里即可自动更新文件名
+    #FILE_PREFIX = 'case090429_1'  # 修改这里即可自动更新文件名
+    FILE_PREFIX = 'case530628_1'  # 修改这里即可自动更新文件名
+
+    for time_v in times:
+        result = process_time_step(sol, time_v, X, Y)
         if result:
             results.append(result)
 
     if results:
-        save_data(results)
+        save_data(results,BASE_PATH,FILE_PREFIX)
         print(f"数据处理完成(A={A})，结果已保存到以下文件：")
         for name in get_output_files().values():
             print(f"  - {FILE_PREFIX}_{name}")
     else:
         print("未找到有效数据")
-
 
 if __name__ == '__main__':
     main()

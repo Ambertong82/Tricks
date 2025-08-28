@@ -6,8 +6,10 @@ from scipy.interpolate import griddata
 import matplotlib.pyplot as plt
 
 # 设置路径和输出目录
-sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Middle_particle23/case230427_4"
-output_dir = "x_integration_results"
+#sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Middle_particle23/case230427_4"
+sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Fine_particle9/case090429_1"
+#sol = "/home/amber/OpenFOAM/amber-v2306/Marino/case0704_4"
+output_dir = "/home/amber/postpro/u_umean_saline"
 os.makedirs(output_dir, exist_ok=True)
 
 # 参数设置
@@ -20,8 +22,9 @@ y_min = 0                # 垂向积分下限（避免壁面影响）
 # 读取网格数据 fludifoam.readmesh(sol) 读取的是网格中心点的数据而非网格节点的数据
 X, Y, Z = fluidfoam.readmesh(sol)
 #times = [5,6,7,8,9,10,11,12] 
-#times = [5,6,7,8,9]
-times  = [10,11,12]
+#times = [15,16,17,18,19]
+#times  = [20,21,22]
+times = np.arange(5, 22, 1)
 
 #for time_v in times:
 for i in range(len(times)):
@@ -122,7 +125,7 @@ for i in range(len(times)):
 
     # --- 插值到规则网格（可选，使绘图更平滑）---
     xi = np.linspace(X.min(), X.max(), 500)
-    yi = np.linspace(Y.min(), Y.max(), 2000)
+    yi = np.linspace(Y.min(), Y.max(), 3000)
     xi, yi = np.meshgrid(xi, yi)
     U_perturb_i = griddata((X, Y), U_perturb, (xi, yi), method='linear')
     # 插值原始速度场（用于流线方向）
@@ -135,7 +138,9 @@ for i in range(len(times)):
     uxi_norm = np.where(magnitude > 0, uxi / magnitude, 0)
     #uxi_norm = np.where(uxi> 0, 1)  # 归一化到 [-1, 1]
     color_scale = uxi_norm  # 颜色基于 Ux 方向 [-1, 1]
-    
+    # 手动缩放数据
+    vmin, vmax = -0.2, 0.1  # 根据数据范围调整
+    U_perturb_i_scaled = np.clip(U_perturb_i, vmin, vmax)
     plt.rcParams.update({
     'font.size': 28,          # 全局字体大小
     'axes.titlesize': 28,     # 子图标题大小
@@ -152,14 +157,15 @@ for i in range(len(times)):
     strm=plt.streamplot(
     xi, yi, U_perturb_i,uyi,
     #shading='auto',
-    color=U_perturb_i,  # 使用扰动速度作为颜色
+    color=U_perturb_i_scaled,  # 使用扰动速度作为颜色
     cmap=plt.cm.rainbow,  # 红蓝渐变色（反向：正值为红，负值为蓝）
     linewidth=1,      # 流线宽度
     density=5,          # 流线密度
     arrowsize=2,        # 箭头大小
     arrowstyle='->',    # 箭头样式
     #alpha=0.7,  # 半透明
-    zorder=1
+    zorder=1,
+    #vmin=-0.2, vmax=0.2, # 颜色映射范围（根据数据调整）
     )
     
     alpha_contour = plt.contour(
@@ -170,17 +176,17 @@ for i in range(len(times)):
         linestyles='dashed', # 线型（可选）
         zorder=3            # 确保在最上层
     )
-    
+    #cbar.set_ticks([-0.2, 0, 0.5])
     cbar = plt.colorbar(
     strm.lines,
     label="Velocity Perturbation $U_a\'$ [m/s]"
     )
-    #cbar.set_ticks([-0.2, 0, 0.5])
+    #cbar.set_ticks([-0.5, 0, 0.05])
     
     
     plt.xlabel('x [m]')
     plt.ylabel('y [m]')
-    plt.xlim(X.min(), 1.8)
+    plt.xlim(1, 2.8)
     plt.title(f'Perturbation Velocity Streamlines (t={time_v})')
     #plt.show()
 
@@ -227,7 +233,7 @@ for i in range(len(times)):
     #cbar.set_ticks([-1, 0, 1])
     plt.xlabel('x [m]')
     plt.ylabel('y [m]')
-    plt.xlim(X.min(), 1.8)
+    plt.xlim(X.min(), 2.8)
     plt.title(f'Original Velocity Streamlines (t={time_v})')
 
 
@@ -272,7 +278,7 @@ for i in range(len(times)):
     ax1.set_title('Perturbation Velocity Streamlines')
     ax1.set_xlabel('x [m]')
     ax1.set_ylabel('y [m]')
-    ax1.set_xlim(X.min(), 1.8)
+    ax1.set_xlim(X.min(), 2.8)
     #ax1.axvline(x=head_x, color='k', linestyle='--', linewidth=1.5, zorder=3)
 
 # --- 子图2: 原始速度场流线 ---
@@ -298,7 +304,7 @@ for i in range(len(times)):
     ax2.set_title('Original Velocity Streamlines')
     ax2.set_xlabel('x [m]')
     ax2.set_ylabel('y [m]')
-    ax2.set_xlim(X.min(), 1.3)
+    ax2.set_xlim(X.min(), 2.8)
     #cbar.set_climits([-0.5,  0.5])
     #ax2.axvline(x=head_x, color='k', linestyle='--', linewidth=1.5, zorder=3)
 
