@@ -5,7 +5,7 @@ import fluidfoam
 from fractions import Fraction
 
 # 常量定义
-A = 1/3  # 修改这里即可自动更新文件名（支持分数/浮点数）
+A = 1/1  # 修改这里即可自动更新文件名（支持分数/浮点数）
 B = 1e-5
 y_min = 0
 alpha_threshold = 1e-5
@@ -45,6 +45,10 @@ def get_output_files():
         'uay': f'x{a_id}xuay.csv',
         'uby': f'x{a_id}xuby.csv',
         'ke_dimless': f'x{a_id}xke_dimless.csv',
+        'H': f'x{a_id}xH.csv',
+        'U': f'x{a_id}xU.csv',
+        'ALPHA': f'x{a_id}xALPHA.csv',
+        'H_depth': f'x{a_id}xH_depth.csv'
     }
 
 
@@ -82,6 +86,50 @@ def calculate_derived_values(yvalue, alpha, kinetic_energy, gamma, grad_dudx, gr
     buoyancy = nutb*(tauxx*seoxx + 2*tauxy*seoxy + tauyy*seoyy)
     dissipation = -(1-alpha)*1000*0.09*kinetic_energy*omega
 
+    # 寻找速度正负交界点
+    sign_changes = np.where(np.diff(np.sign(uavalue)))[0]
+    if len(sign_changes) > 0:
+        positive_to_negative = [
+            i for i in sign_changes
+            if (i + 1 < len(uavalue))
+            and (uavalue[i] > 0)
+            and (uavalue[i + 1] < 0)
+        ]
+        if len(positive_to_negative) > 0:
+            crossing_ya = yvalue[positive_to_negative]
+            max_ya_crossing_index = positive_to_negative[np.argmax(
+            crossing_ya)]
+        #### Mass Flux height #####
+        # 确保 alpha_values 非负  # 计算质量通量 alpha*v 如果是计算通量，那么就不应该是非负
+        differences = np.diff(yvalue, prepend=yvalue[0] - 0) 
+        ua_alpha_values = (uavalue * alpha)
+        ua_values_abs = (uavalue)    
+        sum1 = (ua_alpha_values[1:max_ya_crossing_index] + \
+                            ua_alpha_values[:max_ya_crossing_index - 1]) * differences[1:max_ya_crossing_index] / 2
+        sum2 = (ua_values_abs[1:max_ya_crossing_index] + ua_values_abs[: max_ya_crossing_index - 1]
+                            ) * differences[1:max_ya_crossing_index] / 2
+        sum1[0] = 0
+        sum2[0] = 0
+
+        integral = np.sum(sum1)
+        integralU = np.sum(sum2)
+ 
+        alpha_ua_squre = (uavalue * alpha)**2
+        ua_squre = uavalue**2
+
+        addU = (ua_squre[:max_ya_crossing_index - 1] +
+                            ua_squre[1:max_ya_crossing_index]) * differences[1:max_ya_crossing_index] / 2
+          
+        integralU2 = np.sum(addU)
+        addc = (alpha_ua_squre[:max_ya_crossing_index - 1] + \
+                            alpha_ua_squre[1:max_ya_crossing_index]) * differences[1:max_ya_crossing_index] / 2
+        integral2 = np.sum(addc)
+     
+        U = integralU2 / integralU if integral != 0 else 0
+        H = integral**2 / integral2 if integral2 != 0 else 0
+        ALPHA = integral / integralU if integralU != 0 else 0
+        H_depth = integralU**2 / integralU2 if integralU2 != 0 else 0
+
     return {
         'Rig': Rig.tolist(),
         'Rigg': Rigg.tolist(),
@@ -100,6 +148,10 @@ def calculate_derived_values(yvalue, alpha, kinetic_energy, gamma, grad_dudx, gr
         'dragpart': dragpart.tolist(),
         'buoyancy': buoyancy.tolist(),
         'dissipation': dissipation.tolist(),
+        'H': [H],
+        'U': [U],
+        'ALPHA': [ALPHA],
+        'H_depth': [H_depth]
     
     }
 
@@ -199,6 +251,8 @@ def save_data(data_dict, BASE_PATH, FILE_PREFIX):
             
             # 构建数据行（时间 + x + 数据）
             row = [time_col, item['x']] + item.get(key.replace('timedimless_', ''), [])
+           # row = [time_col, item['x']] + [item.get(key.replace('timedimless_', ''), [])]
+
             data.append(row)
         
         # 转换为DataFrame并转置
@@ -214,17 +268,17 @@ def save_data(data_dict, BASE_PATH, FILE_PREFIX):
 
 def main():
     #sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Middle_particle23/case230427_4"
-    #sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Fine_particle9/case090429_1"
+    sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Fine_particle9/case090429_1"
     #sol="/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Coarse_paticle37/case370428_1"
-    sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Large_particle53/case530826_4"
+    #sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Large_particle53/case530826_4"
 
     X, Y, Z = fluidfoam.readmesh(sol)
-    times = np.arange(1, 14, 1)  # 对应原来的1-79,步长2
+    times = np.arange(1.0, 37, 1)  # 对应原来的1-79,步长2
     results = []
     BASE_PATH = '/home/amber/postpro/selecting_variant/'
 #FILE_PREFIX = 'case230427_4'  # 修改这里即可自动更新文件名
-    #FILE_PREFIX = 'case090429_1'  # 修改这里即可自动更新文件名
-    FILE_PREFIX = 'case530628_1'  # 修改这里即可自动更新文件名
+    FILE_PREFIX = 'case090429_1'  # 修改这里即可自动更新文件名
+    #FILE_PREFIX = 'case530628_1'  # 修改这里即可自动更新文件名
 
     for time_v in times:
         result = process_time_step(sol, time_v, X, Y)
