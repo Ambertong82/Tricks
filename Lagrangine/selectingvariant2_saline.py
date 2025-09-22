@@ -3,7 +3,7 @@ import pandas as pd
 import os
 import fluidfoam
 from fractions import Fraction
-
+## this code is used to extract the data at specific x location (head-0.3) at every time step #####
 # 常量定义
 A = 1/1  # 修改这里即可自动更新文件名（支持分数/浮点数）
 B = 1e-5
@@ -48,7 +48,9 @@ def get_output_files():
         'H': f'x{a_id}xH.csv',
         'U': f'x{a_id}xU.csv',
         'ALPHA': f'x{a_id}xALPHA.csv',
-        'H_depth': f'x{a_id}xH_depth.csv'
+        'H_depth': f'x{a_id}xH_depth.csv',
+        'H_alpha': f'x{a_id}xH_alpha.csv',
+        'U_alpha': f'x{a_id}xU_alpha.csv',
     }
 
 
@@ -84,47 +86,87 @@ def calculate_derived_values(yvalue, alpha, kinetic_energy,  grad_dudx, grad_dvd
     dissipation = -(1-alpha)*1000*0.09*kinetic_energy*omega
         # 寻找速度正负交界点
     sign_changes = np.where(np.diff(np.sign(uavalue)))[0]
-    if len(sign_changes) > 0:
-        positive_to_negative = [
-            i for i in sign_changes
-            if (i + 1 < len(uavalue))
-            and (uavalue[i] > 0)
-            and (uavalue[i + 1] < 0)
-        ]
-        if len(positive_to_negative) > 0:
-            crossing_ya = yvalue[positive_to_negative]
-            max_ya_crossing_index = positive_to_negative[np.argmax(
-            crossing_ya)]
-        #### Mass Flux height #####
-        # 确保 alpha_values 非负  # 计算质量通量 alpha*v 如果是计算通量，那么就不应该是非负
-        differences = np.diff(yvalue, prepend=yvalue[0] - 0) 
-        ua_alpha_values = (uavalue * alpha)
-        ua_values_abs = (uavalue)    
-        sum1 = (ua_alpha_values[1:max_ya_crossing_index] + \
-                            ua_alpha_values[:max_ya_crossing_index - 1]) * differences[1:max_ya_crossing_index] / 2
-        sum2 = (ua_values_abs[1:max_ya_crossing_index] + ua_values_abs[: max_ya_crossing_index - 1]
-                            ) * differences[1:max_ya_crossing_index] / 2
-        sum1[0] = 0
-        sum2[0] = 0
+    max_ya_crossing_index = sign_changes[np.argmax(yvalue[sign_changes])] + 1 if len(sign_changes) > 0 else len(yvalue) - 1
+    y_crossing = yvalue[max_ya_crossing_index]
+    u_crossing = uavalue[max_ya_crossing_index]
+        
+    # Vectorized integration
+    ua_alpha = uavalue * alpha
+    integral = np.trapz(ua_alpha[:max_ya_crossing_index], yvalue[:max_ya_crossing_index])
+    integralU = np.trapz(uavalue[:max_ya_crossing_index], yvalue[:max_ya_crossing_index])
+    integralU2 = np.trapz(uavalue[:max_ya_crossing_index]**2, yvalue[:max_ya_crossing_index])
+    integral2 = np.trapz((uavalue[:max_ya_crossing_index] * alpha[:max_ya_crossing_index])**2, yvalue[:max_ya_crossing_index])
+        
+    # Calculate derived quantities
+    U = integralU2 / integralU if integralU != 0 else 0
+    H = integral**2 / integral2 if integral2 != 0 else 0
+    ALPHA = integral / integralU if integralU != 0 else 0
+    H_depth = integralU**2 / integralU2 if integralU2 != 0 else 0
+    
 
-        integral = np.sum(sum1)
-        integralU = np.sum(sum2)
- 
-        alpha_ua_squre = (uavalue * alpha)**2
-        ua_squre = uavalue**2
+        # Find the y-coordinate where alpha crosses below 1e-5
+        # 首先筛选出 y > 0.005 的点
+    y_threshold = 0.005
+    valid_mask = yvalue > y_threshold
 
-        addU = (ua_squre[:max_ya_crossing_index - 1] +
-                            ua_squre[1:max_ya_crossing_index]) * differences[1:max_ya_crossing_index] / 2
-          
-        integralU2 = np.sum(addU)
-        addc = (alpha_ua_squre[:max_ya_crossing_index - 1] + \
-                            alpha_ua_squre[1:max_ya_crossing_index]) * differences[1:max_ya_crossing_index] / 2
-        integral2 = np.sum(addc)
-     
-        U = integralU2 / integralU if integral != 0 else 0
-        H = integral**2 / integral2 if integral2 != 0 else 0
-        ALPHA = integral / integralU if integralU != 0 else 0
-        H_depth = integralU**2 / integralU2 if integralU2 != 0 else 0
+    if np.any(valid_mask):
+            # 在有效范围内寻找 alpha < 1e-5 的点
+            alpha_threshold = 1e-5
+            below_threshold = (alpha[valid_mask] < alpha_threshold)
+            
+            if np.any(below_threshold):
+                # 找到第一个满足条件的点的相对索引
+                first_below_rel_index = np.argmax(below_threshold)
+                # 转换为原始数组中的绝对索引
+                valid_indices = np.where(valid_mask)[0]
+                max_ya_crossing_index_alpha = valid_indices[first_below_rel_index]
+                y_crossing_alpha = yvalue[max_ya_crossing_index_alpha]  # 修正变量名
+                u_crossing_alpha = uavalue[max_ya_crossing_index_alpha]
+                #print(f"Found y_crossing at {y_crossing_alpha} for xx={xx}")
+            else:
+                # 如果没有找到，使用有效范围内的最大y值
+                max_ya_crossing_index_alpha = np.where(valid_mask)[0][-1]
+                y_crossing_alpha = yvalue[max_ya_crossing_index_alpha]  # 修正变量名
+                u_crossing_alpha = uavalue[max_ya_crossing_index_alpha]
+                #print(f"No alpha < {alpha_threshold} found above y={y_threshold} for xx={xx}, using max y={y_crossing_alpha}")
+    else:
+            # 如果没有y>0.005的点，使用最后一个点
+            max_ya_crossing_index_alpha = len(yvalue) - 1
+            y_crossing_alpha = yvalue[max_ya_crossing_index_alpha]  # 修正变量名
+            u_crossing_alpha = uavalue[max_ya_crossing_index_alpha]  # 无法定义
+
+        # Vectorized integration
+    ua_alpha_alpha = uavalue * alpha
+    integral_alpha = np.trapz(ua_alpha_alpha[:max_ya_crossing_index_alpha], yvalue[:max_ya_crossing_index_alpha])
+    integralU_alpha = np.trapz(uavalue[:max_ya_crossing_index_alpha], yvalue[:max_ya_crossing_index_alpha])
+    integralU2_alpha = np.trapz(uavalue[:max_ya_crossing_index_alpha]**2, yvalue[:max_ya_crossing_index_alpha])
+    integral2_alpha = np.trapz((uavalue[:max_ya_crossing_index_alpha] * alpha[:max_ya_crossing_index_alpha])**2, yvalue[:max_ya_crossing_index_alpha])
+        
+        # Calculate derived quantities
+    U_alpha = integralU2_alpha / integralU_alpha if integralU_alpha != 0 else 0
+    H_alpha = integral_alpha**2 / integral2_alpha if integral2_alpha != 0 else 0
+    ALPHA_alpha = integral_alpha / integralU_alpha if integralU_alpha != 0 else 0
+    H_depth_alpha = integralU_alpha**2 / integralU2_alpha if integralU2_alpha != 0 else 0
+
+        
+        # # Depth-averaged quantities
+        # p_k_average_alpha = np.trapz(P_k[:max_ya_crossing_index_alpha], ya[:max_ya_crossing_index_alpha]) / H if H != 0 else 0
+        # epsilon_average_alpha = np.trapz(epsilon_alpharho[:max_ya_crossing_index_alpha], ya[:max_ya_crossing_index_alpha]) / H if H != 0 else 0
+        # G_average_alpha = np.trapz(G[:max_ya_crossing_index_alpha], ya[:max_ya_crossing_index_alpha]) / H if H != 0 else 0
+        # G2_average_alpha = np.trapz(G2[:max_ya_crossing_index_alpha], ya[:max_ya_crossing_index_alpha]) / H if H != 0 else 0
+
+
+
+    #     # Dimensionless numbers
+    # denominator = g * R * ALPHA * H
+    # Fr = U / np.sqrt(denominator) if denominator > 0 else np.nan
+    # Re = U * H / nu
+        
+    #     # Drag coefficient
+    # grad_Ub0 = grad_dudy[0] if len(grad_dudy) > 0 else 0
+    # u_star2 = grad_Ub0 * nu
+    # Cd = u_star2 / (U**2) if U != 0 else np.nan
+    #     #print(np.max(x_coords))
 
 
     return {
@@ -148,7 +190,9 @@ def calculate_derived_values(yvalue, alpha, kinetic_energy,  grad_dudx, grad_dvd
         'H': [H],
         'U': [U],
         'ALPHA': [ALPHA],
-        'H_depth': [H_depth]
+        'H_depth': [H_depth],
+        'H_alpha': [H_alpha],
+        'U_alpha': [U_alpha],
     
     }
 
@@ -264,7 +308,7 @@ def main():
     #sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Fine_particle9/case090429_1"
     #sol="/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Coarse_paticle37/case370428_1"
     #sol = "/home/amber/OpenFOAM/amber-v2306/Marino/Run8/case0702_5"
-    sol = "/media/amber/PhD_data_xtsun/PhD/saline/case0704_4"
+    sol = "/media/amber/PhD_data_xtsun/PhD/saline/case0704_6"
 
     X, Y, Z = fluidfoam.readmesh(sol)
     times = np.arange(1, 40, 1)  # 对应原来的1-79,步长2
@@ -272,7 +316,7 @@ def main():
     BASE_PATH = '/home/amber/postpro/selecting_variant/'
 #FILE_PREFIX = 'case230427_4'  # 修改这里即可自动更新文件名
     #FILE_PREFIX = 'case090429_1'  # 修改这里即可自动更新文件名
-    FILE_PREFIX = 'case0704_4'  # 修改这里即可自动更新文件名
+    FILE_PREFIX = 'case0704_6'  # 修改这里即可自动更新文件名
 
     for time_v in times:
         result = process_time_step(sol, time_v, X, Y)

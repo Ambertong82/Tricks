@@ -6,6 +6,12 @@ from pathlib import Path
 from time import time
 import matplotlib.pyplot as plt
 
+
+##--------------------------------------------------------------------------------------------------------------------##
+## this code is used to calculate the whole turbidity current characteristics at every time step ###
+## -------------------------------------------------------------------------------------------------------------------##
+
+
 # Constants
 g = 9.81
 R = (3217 - 1000) / 1000
@@ -182,7 +188,7 @@ def process_time_step(case_path, time_dir, output_dir, case_name):
 # Main execution
 if __name__ == "__main__":
     # Setup paths
-    case_path = "/media/amber/PhD_data_xtsun/PhD/saline/case0704_4"
+    case_path = "/media/amber/PhD_data_xtsun/PhD/saline/case0704_6"
     output_dir = "/home/amber/postpro/targeted_variant"
     os.makedirs(output_dir, exist_ok=True)
     

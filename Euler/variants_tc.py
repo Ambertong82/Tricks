@@ -6,6 +6,11 @@ from pathlib import Path
 from time import time
 import matplotlib.pyplot as plt
 
+##--------------------------------------------------------------------------------------------------------------------##
+## this code is used to calculate the whole turbidity current characteristics at every time step ###
+## -------------------------------------------------------------------------------------------------------------------##
+
+
 # Constants
 g = 9.81
 R = (3217 - 1000) / 1000
@@ -273,7 +278,9 @@ def process_time_step(case_path, time_dir, output_dir, case_name):
 # Main execution
 if __name__ == "__main__":
     # Setup paths
-    case_path = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Fine_particle9/case090429_1"
+    #case_path = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Fine_particle9/case090429_1"
+    #case_path = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Middle_particle23/case230427_4"
+    case_path = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Fine_particle9/case090912_1"
     output_dir = "/home/amber/postpro/targeted_variant"
     os.makedirs(output_dir, exist_ok=True)
     
@@ -285,7 +292,7 @@ if __name__ == "__main__":
     X, Y, Z = fluidfoam.readmesh(case_path)
     
     # Process time steps
-    time_dirs = np.arange(10.0, 11, 1)
+    time_dirs = np.arange(5, 13, 1)
     all_dfs = []  # Store DataFrames for all time steps
     
     for time_dir in time_dirs:

@@ -30,17 +30,20 @@ from scipy.interpolate import griddata
 import matplotlib.pyplot as plt
 #from fluidfoam import getTimeNames
 
-#sol = "/media/amber/PhD_data_xtsun/PhD/saline/case0704_5"
+#sol = "/media/amber/PhD_data_xtsun/PhD/saline/case0704_6"
 #sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Fine_particle9/case090429_1"
-sol = "/home/amber/OpenFOAM/amber-v2306/case230427_4test3"
+#sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Fine_particle9/case090912_1"
+sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Middle_particle23/case230427_4fine"
+
+#sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Middle_particle23/case230427_4"
 output_dir = "/home/amber/postpro/frontposition_turbidity"
 os.makedirs(output_dir, exist_ok=True)
-output_file = os.path.join(output_dir, 'front_positionstest3.csv')
+output_file = os.path.join(output_dir, 'front_position_d2327.csv')
 
 # 参数设置
 alpha_threshold = 1e-5   # alpha.a 的头部阈值
 y_min = 0                # 垂向积分下限（避免壁面影响）
-times = np.arange(0.5, 40, 1)
+times = np.arange(1, 35, 1)
 
 
 X, Y, Z = fluidfoam.readmesh(sol)
@@ -57,18 +60,30 @@ for time_v in times:
 
     # --- 定位头部位置（alpha.a > alpha_threshold 的最大 x 坐标）---
     head_x = None
-    head_indices = np.where((X == np.max(X[alpha_A > alpha_threshold])) & 
-                           (Y >= y_min) & 
-                           (alpha_A > alpha_threshold))[0]
-    
+
+    # 找到所有满足alpha阈值的点
+    valid_mask = (alpha_A > alpha_threshold) & (Y >= y_min)
+    if not np.any(valid_mask):
+        print(f"Warning: No head found at t={time_v}")
+        continue
+
+    # 从满足条件的点中找出x坐标最大的值
+    head_x = np.max(X[valid_mask])
+
+    # 找到x坐标等于head_x的所有点（可能有多个y坐标）
+    head_indices = np.where((X == head_x) & valid_mask)[0]
+
     if len(head_indices) == 0:
         print(f"Warning: No head found at t={time_v}")
         continue
-    
+
     # 取第一个满足条件的点（或根据需求调整，如取平均）
     head_idx = head_indices[0]
+
+    
+
     #print(head_idx)
-    head_x = X[head_idx]
+    head_x = head_x
     #print(head_x)
     U_front = Ua_A[:,head_idx]  # 直接索引速度分量
     

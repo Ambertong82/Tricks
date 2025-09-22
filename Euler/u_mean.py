@@ -11,10 +11,11 @@ from matplotlib.colors import TwoSlopeNorm
 ### this code is used to calculate the mean velocity and perturbation velocity field of the turbidity current at every time step #####
 
 # 设置路径和输出目录
-#sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Middle_particle23/case230427_4"
-sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Fine_particle9/case090429_1"
+sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Middle_particle23/case230427_4"
+#sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Fine_particle9/case090912_1"
+#sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Fine_particle9/case090429_1"
 #sol = "/home/amber/OpenFOAM/amber-v2306/Marino/case0704_4"
-output_dir = "/home/amber/postpro/u_umean_tc_d9"
+output_dir = "/home/amber/postpro/u_umean_tc"
 os.makedirs(output_dir, exist_ok=True)
 
 # 参数设置
@@ -28,12 +29,12 @@ y_min = 0                # 垂向积分下限（避免壁面影响）
 X, Y, Z = fluidfoam.readmesh(sol)
 #times = [5,6,7,8,9,10,11,12] 
 #times = [15,16,17,18,19]
-times  = [12.0]
-#times = np.arange(7.0, 11.0, 1)
+times  = [7]
+#times = np.arange(5, 10, 2)
 
  # 通用参数
 FIG_SIZE = (40, 6)
-X_LIM = (0.0, 1.5)
+X_LIM = (0.0, 1.6)
 ALPHA_CONTOUR_PARAMS = {
         'levels': [1e-4],
         'colors': 'black',
@@ -119,6 +120,7 @@ for i in range(len(times)):
     omega_z =  (gradV_x - gradU_y)  # 计算二维流场的z方向涡量分量
 
     # --- 定位头部位置（alpha.a ≈ alpha_threshold 的最大 x 坐标）---
+    
     head_x = None
     for x in np.unique(X):
         mask = (X == x) & (Y >= y_min) & (alpha_A > alpha_threshold)
@@ -134,10 +136,11 @@ for i in range(len(times)):
     # --- 遍历所有 x < head_x 的坐标 ---
     results = []
     x_coords = np.unique(X[(X <= head_x) & (X >= 0)])  # 仅处理有效 x 范围
-
-    for x in x_coords:
-        # 提取当前 x 处的垂向数据
-        mask = (X == x) & (Y >= y_min)
+    for i, xx in enumerate(x_coords):
+        mask = (X == xx) & (alpha_A > 1e-5) & (Y > 0)
+        if not np.any(mask):
+            continue
+        
         ya = Y[mask]
         ua = Ua_A[0][mask]
         alpha = np.maximum(alpha_A[mask], 0)  # 确保 alpha ≥ 0
@@ -145,49 +148,116 @@ for i in range(len(times)):
         # 按 y 排序
         sort_idx = np.argsort(ya)
         ya = ya[sort_idx]
-        ua = ua[sort_idx]
-        alpha = alpha[sort_idx]
+        ua_x = ua[sort_idx]
+        alpha_vals = alpha[sort_idx]
 
         # 计算 dy（垂向间距）
         dy = np.diff(ya, prepend=ya[0] - 0)  # 初始 dy 假设为第一个点的 y 坐标
 
         # --- 垂向积分 ---
         # 有效区域：alpha > threshold 且 ua > 0
-        valid_mask =  (ua > 0) & (alpha > alpha_threshold) 
-        if not np.any(valid_mask):
-            continue  # 跳过无效点
+        # valid_mask =  (ua > 0) & (alpha > alpha_threshold) 
+        # if not np.any(valid_mask):
+        #     continue  # 跳过无效点
 
-        # 积分上限：有效区域的最高 y
-        max_ya = ya[valid_mask][-1]
-        integral_mask = (ya <= max_ya)
+        # # 积分上限：有效区域的最高 y
+        # max_ya = ya[valid_mask][-1]
+        # integral_mask = (ya <= max_ya)
 
-        # 梯形法积分
-        ua_alpha = ua[integral_mask] * alpha[integral_mask]
-        dy_integral = dy[integral_mask]
-        #print(f"Processing x={x:.3f}m at t={time_v} with max_ya={max_ya:.3f}m")
+        # # 梯形法积分
+        # ua_alpha = ua[integral_mask] * alpha[integral_mask]
+        # dy_integral = dy[integral_mask]
+        # #print(f"Processing x={x:.3f}m at t={time_v} with max_ya={max_ya:.3f}m")
 
-        # 质量通量 ∫(u * alpha) dy
-        integral = np.sum(0.5 * (ua_alpha[1:] + ua_alpha[:-1]) * dy_integral[1:])
-        # 速度通量 ∫u dy
-        integralU = np.sum(0.5 * (ua[integral_mask][1:] + ua[integral_mask][:-1]) * dy_integral[1:])
-        # 动能通量 ∫u² dy
-        integralU2 = np.sum(0.5 * (ua[integral_mask][1:]**2 + ua[integral_mask][:-1]**2) * dy_integral[1:])
-        # 平方质量通量 ∫(u * alpha)² dy
-        integral2 = np.sum(0.5 * (ua_alpha[1:]**2 + ua_alpha[:-1]**2) * dy_integral[1:])
+        # # 质量通量 ∫(u * alpha) dy
+        # integral = np.sum(0.5 * (ua_alpha[1:] + ua_alpha[:-1]) * dy_integral[1:])
+        # # 速度通量 ∫u dy
+        # integralU = np.sum(0.5 * (ua[integral_mask][1:] + ua[integral_mask][:-1]) * dy_integral[1:])
+        # # 动能通量 ∫u² dy
+        # integralU2 = np.sum(0.5 * (ua[integral_mask][1:]**2 + ua[integral_mask][:-1]**2) * dy_integral[1:])
+        # # 平方质量通量 ∫(u * alpha)² dy
+        # integral2 = np.sum(0.5 * (ua_alpha[1:]**2 + ua_alpha[:-1]**2) * dy_integral[1:])
 
-        # 计算关键参数
+        # # 计算关键参数
+        # U = integralU2 / integralU if integralU != 0 else 0
+        # H = integral**2 / integral2 if integral2 != 0 else 0
+        # ALPHA = integral / integralU if integralU != 0 else 0
+
+        # Find the front height
+        sign_changes = np.where(np.diff(np.sign(ua_x)))[0]
+        max_ya_crossing_index = sign_changes[np.argmax(ya[sign_changes])] + 1 if len(sign_changes) > 0 else len(ya) - 1
+        y_crossing = ya[max_ya_crossing_index]
+        u_crossing = ua_x[max_ya_crossing_index]
+
+        # Vectorized integration
+        ua_alpha = ua_x * alpha_vals
+        integral = np.trapz(ua_alpha[:max_ya_crossing_index], ya[:max_ya_crossing_index])
+        integralU = np.trapz(ua_x[:max_ya_crossing_index], ya[:max_ya_crossing_index])
+        integralU2 = np.trapz(ua_x[:max_ya_crossing_index]**2, ya[:max_ya_crossing_index])
+        integral2 = np.trapz((ua_x[:max_ya_crossing_index] * alpha_vals[:max_ya_crossing_index])**2, ya[:max_ya_crossing_index])
+        
+        # Calculate derived quantities
         U = integralU2 / integralU if integralU != 0 else 0
         H = integral**2 / integral2 if integral2 != 0 else 0
         ALPHA = integral / integralU if integralU != 0 else 0
+        H_depth = integralU**2 / integralU2 if integralU2 != 0 else 0
+
+
+# 首先筛选出 y > 0.005 的点
+        y_threshold = 0.005
+        valid_mask = ya > y_threshold
+
+        if np.any(valid_mask):
+            # 在有效范围内寻找 alpha < 1e-5 的点
+            alpha_threshold = 1e-5
+            below_threshold = (alpha_vals[valid_mask] < alpha_threshold)
+            
+            if np.any(below_threshold):
+                # 找到第一个满足条件的点的相对索引
+                first_below_rel_index = np.argmax(below_threshold)
+                # 转换为原始数组中的绝对索引
+                valid_indices = np.where(valid_mask)[0]
+                max_ya_crossing_index_alpha = valid_indices[first_below_rel_index]
+                y_crossing_alpha = ya[max_ya_crossing_index_alpha]  # 修正变量名
+                u_crossing_alpha = ua_x[max_ya_crossing_index_alpha]
+                #print(f"Found y_crossing at {y_crossing_alpha} for xx={xx}")
+            else:
+                # 如果没有找到，使用有效范围内的最大y值
+                max_ya_crossing_index_alpha = np.where(valid_mask)[0][-1]
+                y_crossing_alpha = ya[max_ya_crossing_index_alpha]  # 修正变量名
+                u_crossing_alpha = ua_x[max_ya_crossing_index_alpha]
+                #print(f"No alpha < {alpha_threshold} found above y={y_threshold} for xx={xx}, using max y={y_crossing_alpha}")
+        else:
+            # 如果没有y>0.005的点，使用最后一个点
+            max_ya_crossing_index_alpha = len(ya) - 1
+            y_crossing_alpha = ya[max_ya_crossing_index_alpha]  # 修正变量名
+            u_crossing_alpha = ua_x[max_ya_crossing_index_alpha]  # 无法定义
+
+        # Vectorized integration
+        ua_alpha_alpha = ua_x * alpha_vals
+        integral_alpha = np.trapz(ua_alpha_alpha[:max_ya_crossing_index_alpha], ya[:max_ya_crossing_index_alpha])
+        integralU_alpha = np.trapz(ua_x[:max_ya_crossing_index_alpha], ya[:max_ya_crossing_index_alpha])
+        integralU2_alpha = np.trapz(ua_x[:max_ya_crossing_index_alpha]**2, ya[:max_ya_crossing_index_alpha])
+        integral2_alpha = np.trapz((ua_x[:max_ya_crossing_index_alpha] * alpha_vals[:max_ya_crossing_index_alpha])**2, ya[:max_ya_crossing_index_alpha])
+        
+        # Calculate derived quantities
+        U_alpha = integralU2_alpha / integralU_alpha if integralU_alpha != 0 else 0
+        H_alpha = integral_alpha**2 / integral2_alpha if integral2_alpha != 0 else 0
+        ALPHA_alpha = integral_alpha / integralU_alpha if integralU_alpha != 0 else 0
+        H_depth_alpha = integralU_alpha**2 / integralU2_alpha if integralU2_alpha != 0 else 0
 
 
         results.append({
             "Time": time_v,
-            "x": x,
+            "x": xx,
             "U": U,
             "H": H,
             "ALPHA": ALPHA,
-            "max_ya": max_ya
+            "y_crossing": y_crossing,
+            "U_alpha"   : U_alpha,
+            "H_alpha"   : H_alpha,
+            "ALPHA_alpha": ALPHA_alpha,
+            "y_crossing_alpha": y_crossing_alpha
         })
 
 
@@ -200,19 +270,22 @@ for i in range(len(times)):
     # --- 计算速度扰动 U_a' = U_a - U(x) ---
     # 从DataFrame中获取U值，并创建x到U的映射
     x_U_mapping = dict(zip(df['x'], df['U']))
-    
+    x_U_mapping_alpha = dict(zip(df['x'], df['U_alpha']))
     #U_perturb = np.zeros_like(Ua_A[0])
     U_perturb = Ua_A[0].copy()  # 直接使用 Ua_A[0] 的形状
+    U_perturb_alpha = Ua_A[0].copy()
     for x in x_coords:
         if x in x_U_mapping:  # 确保x在计算结果中
             mask = (X == x)
             U_perturb[mask] = Ua_A[0][mask] - x_U_mapping[x]
+            U_perturb_alpha[mask] = Ua_A[0][mask] - x_U_mapping_alpha[x]
 
     # --- 插值到规则网格（可选，使绘图更平滑）---
     xi = np.linspace(X.min(), X.max(), 500)
     yi = np.linspace(Y.min(), Y.max(), 3000)
     xi, yi = np.meshgrid(xi, yi)
     U_perturb_i = griddata((X, Y), U_perturb, (xi, yi), method='linear')
+    U_perturb_i_alpha = griddata((X, Y), U_perturb_alpha, (xi, yi), method='linear')
     # 插值原始速度场（用于流线方向）
     uxi = griddata((X, Y), Ua_A[0], (xi, yi), method='linear')  # Ux 分量
     uyi = griddata((X, Y), Ua_A[1], (xi, yi), method='linear')  # Uy 分量
@@ -327,6 +400,45 @@ for i in range(len(times)):
     plt.close()
 
 
+
+
+    """绘制扰动速度流线图"""
+    plt.figure(figsize=FIG_SIZE)
+    
+    # 归一化和缩放
+    magnitude = np.sqrt(U_perturb_i_alpha**2 + uyi**2)
+    U_perturb_i_norm = np.where(magnitude > 0, U_perturb_i_alpha / magnitude, 0)
+    U_perturb_i_scaled = np.clip(U_perturb_i_alpha, -0.2, 0.05)
+    
+    strm = plt.streamplot(
+        xi, yi, U_perturb_i, uyi,
+        color=U_perturb_i_scaled,
+        cmap=plt.cm.rainbow,
+        linewidth=1,
+        density=8,
+        arrowsize=3,
+        arrowstyle='->',
+        zorder=1
+    )
+    
+    plt.contour(xi, yi, alpha_i, **ALPHA_CONTOUR_PARAMS)
+
+    for label, x_pos in positions.items():
+        plt.axvline(x=x_pos, color='b', linestyle='dashdot', linewidth=1, zorder=3)
+        plt.text(x_pos + 0.01, y_text, f'{label}', 
+                fontsize=15, zorder=3, color='b')
+        #y_text += 0.04
+    
+    cbar = plt.colorbar(strm.lines, label="Velocity Perturbation $U_aALPHA\'$ [m/s]")
+    plt.xlabel('x [m]')
+    plt.ylabel('y [m]')
+    plt.xlim(*X_LIM)
+    plt.title(f'Perturbation Velocity Streamlines (t={time_v})')
+    plt.savefig(os.path.join(output_dir, f'perturbation_streamlines_ALPHA_t{time_v}.png'), 
+              dpi=300, bbox_inches='tight')
+    plt.close()
+
+
     """绘制原始速度流线图"""
     plt.figure(figsize=FIG_SIZE)
     uxi_scaled = np.clip(uxi, 0.1, 0.2)
@@ -336,7 +448,7 @@ for i in range(len(times)):
         color=uxi_scaled,
         cmap=plt.cm.rainbow,
         linewidth=1,
-        density=3,
+        density=8,
         arrowsize=2,
         arrowstyle='->',
         zorder=2
@@ -428,7 +540,7 @@ for i in range(len(times)):
 
     plt.figure(figsize=FIG_SIZE)
     
-    Q_levels = np.linspace(-10, 10, 41)
+    Q_levels = np.linspace(-5, 5, 41)
     Q_contour_signed = plt.contourf(
         xi, yi, Q_signed_smoothed_i,
         levels=Q_levels,
@@ -466,8 +578,7 @@ for i in range(len(times)):
     ax.grid(which='minor', linestyle='--', linewidth='0.5', color='gray', alpha=1.0)
 
 
-
-    plt.title(f'Q-Criterion Contours_signed_omega (t={time_v})')
+    plt.title(f'Vortex indentification via Q_criterion with vorticity magnitude (t={time_v})')
     plt.savefig(os.path.join(output_dir, f'Q_criterion_t{time_v}_signed_omega.png'), 
               dpi=300, bbox_inches='tight')
     plt.close()
