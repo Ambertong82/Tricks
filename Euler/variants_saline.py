@@ -99,9 +99,9 @@ def process_time_step(case_path, time_dir, output_dir, case_name):
         
         # Sort by y-coordinate
         sort_idx = np.argsort(ya)
-        ya = ya[sort_idx]
-        ua_x = ua_x[sort_idx]
-        alpha_vals = alpha_vals[sort_idx]
+        # ya = ya[sort_idx]
+        # ua_x = ua_x[sort_idx]
+        # alpha_vals = alpha_vals[sort_idx]
         
         # Calculate velocity shear stress (向量化计算)
         S_xx = grad_dudx[sort_idx]

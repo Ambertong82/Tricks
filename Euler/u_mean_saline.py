@@ -19,7 +19,7 @@ output_dir = "/home/amber/postpro/u_umean_saline"
 os.makedirs(output_dir, exist_ok=True)
 
 # 参数设置
-alpha_threshold = 1e-5   # alpha.a 的头部阈值
+alpha_threshold = 1e-4   # alpha.a 的头部阈值
 y_min = 0                # 垂向积分下限（避免壁面影响）
  
 
@@ -28,19 +28,19 @@ y_min = 0                # 垂向积分下限（避免壁面影响）
 #times = sorted([float(t) for t in times if t.replace('.', '').isdigit()])
 # 读取网格数据 fludifoam.readmesh(sol) 读取的是网格中心点的数据而非网格节点的数据
 X, Y, Z = fluidfoam.readmesh(sol)
-xi = np.linspace(X.min(), X.max(), 750)
-yi = np.linspace(Y.min(), Y.max(), 300)
+xi = np.linspace(X.min(), X.max(), 500)
+yi = np.linspace(Y.min(), Y.max(), 3000)
 xi, yi = np.meshgrid(xi, yi)
 #times = [12,13,14] 
 #times = [15,16,17,18,19,20,21,22]
-times  = [5]
+times  = [10]
 #times = np.arange(5, 11, 2)
 
     # 通用参数
 FIG_SIZE = (40, 6)
-X_LIM = (0, 1.5)
+X_LIM = (0, 2.5)
 ALPHA_CONTOUR_PARAMS = {
-        'levels': [1e-4],
+        'levels': [1e-5],
         'colors': 'black',
         'linewidths': 2,
         'linestyles': 'dashed',
@@ -115,11 +115,12 @@ for i in range(len(times)):
     Ua_A = fluidfoam.readvector(sol, str(time_v), "U")
     alpha_A = fluidfoam.readscalar(sol, str(time_v), "alpha.saline")
     gradU = fluidfoam.readtensor(sol, str(time_v), "grad(U)")
+    vorticity = fluidfoam.readvector(sol, str(time_v), "vorticity")
     gradU_x = gradU[0]  # dUx/dx
     gradU_y = gradU[3]  # dUx/dy
     gradV_x = gradU[1]  # dUy/dx
     gradV_y = gradU[4]  # dUy/dy
-    omega_z =  (gradV_x - gradU_y)  # 计算二维流场的z方向涡量分量
+    omega_z = vorticity[2]  # 计算二维流场的z方向涡量分量
     
     
 
@@ -274,6 +275,7 @@ for i in range(len(times)):
     uxi = griddata((X, Y), Ua_A[0], (xi, yi), method='linear')  # Ux 分量
     uyi = griddata((X, Y), Ua_A[1], (xi, yi), method='linear')  # Uy 分量
     alpha_i = griddata((X, Y), alpha_A, (xi, yi), method='linear')
+    vorticity_i = griddata((X, Y), omega_z, (xi, yi), method='linear')
     
 
     # 计算Q准则
@@ -311,40 +313,40 @@ for i in range(len(times)):
     
     
 
-#def plot_velocity_vectors(X, Y, U_perturb, Ua_A, xi, yi, alpha_i, time_v, output_dir):
+# #def plot_velocity_vectors(X, Y, U_perturb, Ua_A, xi, yi, alpha_i, time_v, output_dir):
     
-    """绘制速度矢量图"""
-    plt.figure(figsize=FIG_SIZE)
+#     """绘制速度矢量图"""
+#     plt.figure(figsize=FIG_SIZE)
     
-    # 矢量场参数
-    skip = 5
-    scale = 20
-    width = 0.002
+#     # 矢量场参数
+#     skip = 5
+#     scale = 20
+#     width = 0.002
     
-    plt.quiver(
-        X[::skip], Y[::skip],
-        U_perturb[::skip], Ua_A[1][::skip],
-        scale=scale,
-        width=width,
-        color='blue'
-    )
+#     plt.quiver(
+#         X[::skip], Y[::skip],
+#         U_perturb[::skip], Ua_A[1][::skip],
+#         scale=scale,
+#         width=width,
+#         color='blue'
+#     )
     
-    if 'alpha_i' in locals():
-        plt.contour(xi, yi, alpha_i, **ALPHA_CONTOUR_PARAMS)
+#     if 'alpha_i' in locals():
+#         plt.contour(xi, yi, alpha_i, **ALPHA_CONTOUR_PARAMS)
 
-    for label, x_pos in positions.items():
-        plt.axvline(x=x_pos, color='b', linestyle='dashdot', linewidth=1, zorder=3)
-        plt.text(x_pos + 0.01, y_text, f'{label}', 
-                fontsize=15, zorder=3, color='b')
-        #y_text += 0.04    
+#     for label, x_pos in positions.items():
+#         plt.axvline(x=x_pos, color='b', linestyle='dashdot', linewidth=1, zorder=3)
+#         plt.text(x_pos + 0.01, y_text, f'{label}', 
+#                 fontsize=15, zorder=3, color='b')
+#         #y_text += 0.04    
     
-    plt.xlabel('x [m]')
-    plt.ylabel('y [m]')
-    plt.xlim(*X_LIM)
-    plt.title(f'Velocity Vectors (t={time_v}) - No Interpolation')
-    plt.savefig(os.path.join(output_dir, f'velocity_vectors_t{time_v}.png'), 
-              dpi=300, bbox_inches='tight')
-    plt.close()
+#     plt.xlabel('x [m]')
+#     plt.ylabel('y [m]')
+#     plt.xlim(*X_LIM)
+#     plt.title(f'Velocity Vectors (t={time_v}) - No Interpolation')
+#     plt.savefig(os.path.join(output_dir, f'velocity_vectors_t{time_v}.png'), 
+#               dpi=300, bbox_inches='tight')
+#     plt.close()
 
 
     """绘制扰动速度流线图"""
@@ -454,13 +456,13 @@ for i in range(len(times)):
     plt.close()
 
 
-    """绘制Q准则涡分布图"""
+    """omega_z"""
     plt.figure(figsize=FIG_SIZE)
     
-    Q_levels = np.linspace(-3.5, 3.5, 21)
-    Q_contour = plt.contourf(
-        xi, yi, Q_i,
-        levels=Q_levels,
+    V_levels = np.linspace(-10.5, 10.5, 81)
+    V_contour = plt.contourf(
+        xi, yi, vorticity_i,
+        levels=V_levels,
         cmap='bwr',
         extend='both'
     )
@@ -476,12 +478,12 @@ for i in range(len(times)):
                 fontsize=15, zorder=3, color='b')
         #y_text += 0.04
     
-    cbar = plt.colorbar(Q_contour, label='Q-Criterion')
+    cbar = plt.colorbar(V_contour, label='$\omega_z$')
     plt.xlabel('x [m]')
     plt.ylabel('y [m]')
     plt.xlim(*X_LIM)
-    plt.title(f'Q-Criterion Contours (t={time_v})')
-    plt.savefig(os.path.join(output_dir, f'Q_criterion_t{time_v}.png'), 
+    plt.title(f'Vorticity (t={time_v})')
+    plt.savefig(os.path.join(output_dir, f'Vorticity_t{time_v}.png'), 
               dpi=300, bbox_inches='tight')
     plt.close()
 
@@ -517,35 +519,35 @@ for i in range(len(times)):
     #           dpi=300, bbox_inches='tight')
     # plt.close()
 
-    """绘制考虑涡量后的Q准则涡分布图"""
+    # """绘制考虑涡量后的Q准则涡分布图"""
     
 
-    plt.figure(figsize=FIG_SIZE)
+    # plt.figure(figsize=FIG_SIZE)
     
-    Q_levels = np.linspace(-5, 5, 41)
-    Q_contour_signed = plt.contourf(
-        xi, yi, Q_signed_smoothed_i,
-        levels=Q_levels,
-        cmap='bwr',
-        extend='both'
-    )
+    # Q_levels = np.linspace(-5, 5, 41)
+    # Q_contour_signed = plt.contourf(
+    #     xi, yi, Q_signed_smoothed_i,
+    #     levels=Q_levels,
+    #     cmap='bwr',
+    #     extend='both'
+    # )
     
-    plt.contour(xi, yi, alpha_i, **ALPHA_CONTOUR_PARAMS)
+    # plt.contour(xi, yi, alpha_i, **ALPHA_CONTOUR_PARAMS)
 
-    for label, x_pos in positions.items():
-        plt.axvline(x=x_pos, color='b', linestyle='dashdot', linewidth=1, zorder=3)
-        plt.text(x_pos + 0.01, y_text, f'{label}', 
-                fontsize=15, zorder=3, color='b')
-        #y_text += 0.04
+    # for label, x_pos in positions.items():
+    #     plt.axvline(x=x_pos, color='b', linestyle='dashdot', linewidth=1, zorder=3)
+    #     plt.text(x_pos + 0.01, y_text, f'{label}', 
+    #             fontsize=15, zorder=3, color='b')
+    #     #y_text += 0.04
     
-    cbar = plt.colorbar(Q_contour_signed, label='Q-Criterion')
-    plt.xlabel('x [m]')
-    plt.ylabel('y [m]')
-    plt.xlim(*X_LIM)
-    plt.title(f'Vortex indentification via Q_criterion with vorticity magnitude (t={time_v})')
-    plt.savefig(os.path.join(output_dir, f'Q_criterion_t{time_v}_signed_omega.png'), 
-              dpi=300, bbox_inches='tight')
-    plt.close()
+    # cbar = plt.colorbar(Q_contour_signed, label='Q-Criterion')
+    # plt.xlabel('x [m]')
+    # plt.ylabel('y [m]')
+    # plt.xlim(*X_LIM)
+    # plt.title(f'Vortex indentification via Q_criterion with vorticity magnitude (t={time_v})')
+    # plt.savefig(os.path.join(output_dir, f'Q_criterion_t{time_v}_signed_omega.png'), 
+    #           dpi=300, bbox_inches='tight')
+    # plt.close()
 
 
 print(f"All results saved to: {output_dir}")

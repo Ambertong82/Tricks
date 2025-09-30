@@ -6,7 +6,7 @@ from fractions import Fraction
 ### this code is used to extract the data at specific x location (head-0.3) at every time step #####
 
 # 常量定义
-A = 1/3  # 修改这里即可自动更新文件名（支持分数/浮点数）
+A = 1/4  # 修改这里即可自动更新文件名（支持分数/浮点数）
 B = 1e-5
 y_min = 0
 alpha_threshold = 1e-5
@@ -54,16 +54,18 @@ def get_output_files():
         'U_alpha': f'x{a_id}xU_alpha.csv',
         'ALPHA_alpha': f'x{a_id}xALPHA_alpha.csv',
         'H_depth_alpha': f'x{a_id}xH_depth_alpha.csv',
+        'advection': f'x{a_id}xAdvection.csv',
+        'vorticity': f'x{a_id}xVorticity.csv'
     }
 
 
-def calculate_derived_values(yvalue, alpha, kinetic_energy, gamma, grad_dudx, grad_dvdx, 
+def calculate_derived_values(xvalue,yvalue, alpha, kinetic_energy, gamma, grad_dudx, grad_dvdx, 
                            grad_dudy, grad_dvdy, nutb, uavalue, ubvalue, uavalueyy, 
-                           ubvalueyy, grad_alpha1, grad_alpha2, grad_beta1, grad_beta2, omega):
+                           ubvalueyy, grad_alpha1, grad_alpha2, grad_beta1, grad_beta2, omega, grad_vortx, grad_vorty):
     """计算衍生量"""
     rho_mix = alpha * 2217 + 1000
     drhody = np.gradient(rho_mix, yvalue)
-    dalphady = np.gradient(alpha, yvalue)
+    
 
     with np.errstate(divide='ignore', invalid='ignore'):
         Rig = -9.81 * drhody / (1000 * grad_dudy**2)
@@ -72,6 +74,8 @@ def calculate_derived_values(yvalue, alpha, kinetic_energy, gamma, grad_dudx, gr
         Rigg = np.nan_to_num(Rigg, nan=0.0, posinf=0.0, neginf=0.0)
 
     omegaz = grad_dvdx - grad_dudy
+
+    advection = (1-alpha) * 1000 *(ubvalue * grad_vortx + ubvalueyy * grad_vorty)
     reynolds12 = nutb * (grad_dudy + grad_dvdx)*1000
     reynolds11 = nutb * (grad_dudx + grad_dvdx-2/3*kinetic_energy)*1000
     reynolds22 = nutb * (grad_dvdy + grad_dvdy-2/3*kinetic_energy)*1000
@@ -99,16 +103,16 @@ def calculate_derived_values(yvalue, alpha, kinetic_energy, gamma, grad_dudx, gr
         
     # Vectorized integration
     ua_alpha = uavalue * alpha
-    integral = np.trapz(ua_alpha[:max_ya_crossing_index], yvalue[:max_ya_crossing_index])
-    integralU = np.trapz(uavalue[:max_ya_crossing_index], yvalue[:max_ya_crossing_index])
-    integralU2 = np.trapz(uavalue[:max_ya_crossing_index]**2, yvalue[:max_ya_crossing_index])
-    integral2 = np.trapz((uavalue[:max_ya_crossing_index] * alpha[:max_ya_crossing_index])**2, yvalue[:max_ya_crossing_index])
+    Ucih = np.trapz(ua_alpha[:max_ya_crossing_index], yvalue[:max_ya_crossing_index])
+    Uh = np.trapz(uavalue[:max_ya_crossing_index], yvalue[:max_ya_crossing_index])
+    U2h = np.trapz(uavalue[:max_ya_crossing_index]**2, yvalue[:max_ya_crossing_index])
+    Uci2h = np.trapz((uavalue[:max_ya_crossing_index] * alpha[:max_ya_crossing_index])**2, yvalue[:max_ya_crossing_index])
         
     # Calculate derived quantities
-    U = integralU2 / integralU if integralU != 0 else 0
-    H = integral**2 / integral2 if integral2 != 0 else 0
-    ALPHA = integral / integralU if integralU != 0 else 0
-    H_depth = integralU**2 / integralU2 if integralU2 != 0 else 0
+    U = U2h / Uh if Uh != 0 else 0
+    H = Ucih**2 / Uci2h if Uci2h != 0 else 0
+    ALPHA = Ucih / Uh if Uh != 0 else 0
+    H_depth = Uh**2 / U2h if U2h != 0 else 0
     
 
         # Find the y-coordinate where alpha crosses below 1e-5
@@ -183,6 +187,7 @@ def calculate_derived_values(yvalue, alpha, kinetic_energy, gamma, grad_dudx, gr
         'U_alpha': [U_alpha],
         'ALPHA_alpha': [ALPHA_alpha],
         'H_depth_alpha': [H_depth_alpha],
+        'advection': advection.tolist()
     
     }
 
@@ -200,6 +205,7 @@ def process_time_step(sol, time_v, X, Y):
     grad_alpha = fluidfoam.readvector(sol, str(time_v), "grad(alpha.a)")
     grad_beta = fluidfoam.readvector(sol, str(time_v), "grad(alpha.b)")
     gamma = fluidfoam.readscalar(sol, str(time_v), "K")
+    vorticity_grad = fluidfoam.readtensor(sol, str(time_v), "grad(vorticity)")
 
     # 定位头部位置
     head_x = None
@@ -223,7 +229,9 @@ def process_time_step(sol, time_v, X, Y):
         return None
 
     yvalue = Y[mask]
+    xvalue = X[mask]
     uavalue = Ua[0][mask]
+    
     ubvalue = Ub[0][mask]
     uavalueyy = Ua[1][mask]
     ubvalueyy = Ub[1][mask]
@@ -241,12 +249,14 @@ def process_time_step(sol, time_v, X, Y):
     grad_alpha2 = grad_alpha[1][mask]
     grad_beta1 = grad_beta[0][mask]
     grad_beta2 = grad_beta[1][mask]
+    grad_vortx = vorticity_grad[2][mask]
+    grad_vorty = vorticity_grad[5][mask]
 
     # 计算衍生量
     derived = calculate_derived_values(
-        yvalue, alpha_value, kinetic_energy, gamma[mask], grad_dudx, grad_dvdx,
+        xvalue,yvalue, alpha_value, kinetic_energy, gamma[mask], grad_dudx, grad_dvdx,
         grad_dudy, grad_dvdy, nutb_value, uavalue, ubvalue, uavalueyy, ubvalueyy,
-        grad_alpha1, grad_alpha2, grad_beta1, grad_beta2, omega_value
+        grad_alpha1, grad_alpha2, grad_beta1, grad_beta2, omega_value,grad_vortx, grad_vorty
     )
 
     return {
@@ -307,7 +317,7 @@ def main():
     #sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Large_particle53/case530826_4"
 
     X, Y, Z = fluidfoam.readmesh(sol)
-    times = np.arange(1, 9, 1)  # 对应原来的1-79,步长2
+    times = np.arange(1, 15, 1)  # 对应原来的1-79,步长2
     results = []
     BASE_PATH = '/home/amber/postpro/selecting_variant/'
     FILE_PREFIX = 'case230427_4midd'  # 修改这里即可自动更新文件名

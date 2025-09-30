@@ -52,6 +52,7 @@ def process_time_step(case_path, time_dir, output_dir, case_name):
         gamma = fluidfoam.readscalar(case_path, str(time_dir), "K")
         gradUb = fluidfoam.readtensor(case_path, str(time_dir), "grad(U.b)")
         grad_alpha = fluidfoam.readvector(case_path, str(time_dir), "grad(alpha.a)")
+        vorticity_grad = fluidfoam.readtensor(case_path, str(time_dir), "grad(vorticity)")
     except Exception as e:
         print(f"Error reading fields at time {time_dir}: {e}")
         return None
@@ -89,8 +90,8 @@ def process_time_step(case_path, time_dir, output_dir, case_name):
     #         continue
 
     # Extract data
-        ya = Y[mask]
-        ua_x = Ua[0][mask]
+        yvalue = Y[mask]
+        uavalue = Ua[0][mask]
         alpha_vals = alpha[mask]
         ub_x = Ub[0][mask]
         ub_y = Ub[1][mask]
@@ -104,13 +105,15 @@ def process_time_step(case_path, time_dir, output_dir, case_name):
         grad_dvdy = gradUb[4][mask]
         grad_dalphadx = grad_alpha[0][mask]
         grad_dalphady = grad_alpha[1][mask]
+        grad_omegazx = vorticity_grad[2][mask]
+        grad_omegazy = vorticity_grad[5][mask]
         
         # Sort by y-coordinate
-        sort_idx = np.argsort(ya)
-        ya = ya[sort_idx]
-        ua_x = ua_x[sort_idx]
-        alpha_vals = alpha_vals[sort_idx]
-        grad_dudy = grad_dudy[sort_idx]
+        sort_idx = np.argsort(yvalue)
+        # yvalue = yvalue[sort_idx]
+        # uavalue = uavalue[sort_idx]
+        # alpha_vals = alpha_vals[sort_idx]
+        # grad_dudy = grad_dudy[sort_idx]
         
         # Calculate velocity shear stress
         S_xx = grad_dudx[sort_idx]
@@ -124,8 +127,8 @@ def process_time_step(case_path, time_dir, output_dir, case_name):
         
         # Calculate drag force components
         G = gamma_vals[sort_idx] * (
-            (ub_x[sort_idx] - ua_x) * nut_vals[sort_idx] * grad_dalphadx[sort_idx] / (Sc * (1 - alpha_vals)) +
-            (ub_y[sort_idx] - ua_x) * nut_vals[sort_idx] * grad_dalphady[sort_idx] / (Sc * (1 - alpha_vals))
+            (ub_x[sort_idx] - uavalue) * nut_vals[sort_idx] * grad_dalphadx[sort_idx] / (Sc * (1 - alpha_vals)) +
+            (ub_y[sort_idx] - uavalue) * nut_vals[sort_idx] * grad_dalphady[sort_idx] / (Sc * (1 - alpha_vals))
         )
         
         G2 = gamma_vals[sort_idx] * (1 / np.sqrt(Sc) - 1) * 2 * alpha_vals * kb_vals[sort_idx]
@@ -133,36 +136,40 @@ def process_time_step(case_path, time_dir, output_dir, case_name):
         ####    find the upper limit of integration by using the positive steamwise velocity  ####
         
         # Find the front height
-        sign_changes = np.where(np.diff(np.sign(ua_x)))[0]
-        max_ya_crossing_index = sign_changes[np.argmax(ya[sign_changes])] + 1 if len(sign_changes) > 0 else len(ya) - 1
-        y_crossing = ya[max_ya_crossing_index]
-        u_crossing = ua_x[max_ya_crossing_index]
+        sign_changes = np.where(np.diff(np.sign(uavalue)))[0]
+        max_ya_crossing_index = sign_changes[np.argmax(yvalue[sign_changes])] + 1 if len(sign_changes) > 0 else len(yvalue) - 1
+        y_crossing = yvalue[max_ya_crossing_index]
+        u_crossing = uavalue[max_ya_crossing_index]
 
         # Vectorized integration
-        ua_alpha = ua_x * alpha_vals
-        integral = np.trapz(ua_alpha[:max_ya_crossing_index], ya[:max_ya_crossing_index])
-        integralU = np.trapz(ua_x[:max_ya_crossing_index], ya[:max_ya_crossing_index])
-        integralU2 = np.trapz(ua_x[:max_ya_crossing_index]**2, ya[:max_ya_crossing_index])
-        integral2 = np.trapz((ua_x[:max_ya_crossing_index] * alpha_vals[:max_ya_crossing_index])**2, ya[:max_ya_crossing_index])
-        
+        # Vectorized integration
+        ua_alpha = uavalue * alpha
+        Ucih = np.trapz(ua_alpha[:max_ya_crossing_index], yvalue[:max_ya_crossing_index])
+        Uh = np.trapz(uavalue[:max_ya_crossing_index], yvalue[:max_ya_crossing_index])
+        U2h = np.trapz(uavalue[:max_ya_crossing_index]**2, yvalue[:max_ya_crossing_index])
+        Uci2h = np.trapz((uavalue[:max_ya_crossing_index] * alpha[:max_ya_crossing_index])**2, yvalue[:max_ya_crossing_index])
+
+
+
+            
         # Calculate derived quantities
-        U = integralU2 / integralU if integralU != 0 else 0
-        H = integral**2 / integral2 if integral2 != 0 else 0
-        ALPHA = integral / integralU if integralU != 0 else 0
-        H_depth = integralU**2 / integralU2 if integralU2 != 0 else 0
+        U = U2h / Uh if Uh != 0 else 0
+        H = Ucih**2 / Uci2h if Uci2h != 0 else 0
+        ALPHA = Ucih / Uh if Uh != 0 else 0
+        H_depth = Uh**2 / U2h if U2h != 0 else 0
 
         
         # Depth-averaged quantities
-        p_k_average = np.trapz(P_k[:max_ya_crossing_index], ya[:max_ya_crossing_index]) / H if H != 0 else 0
-        epsilon_average = np.trapz(epsilon_alpharho[:max_ya_crossing_index], ya[:max_ya_crossing_index]) / H if H != 0 else 0
-        G_average = np.trapz(G[:max_ya_crossing_index], ya[:max_ya_crossing_index]) / H if H != 0 else 0
-        G2_average = np.trapz(G2[:max_ya_crossing_index], ya[:max_ya_crossing_index]) / H if H != 0 else 0
+        p_k_average = np.trapz(P_k[:max_ya_crossing_index], yvalue[:max_ya_crossing_index]) / H if H != 0 else 0
+        epsilon_average = np.trapz(epsilon_alpharho[:max_ya_crossing_index], yvalue[:max_ya_crossing_index]) / H if H != 0 else 0
+        G_average = np.trapz(G[:max_ya_crossing_index], yvalue[:max_ya_crossing_index]) / H if H != 0 else 0
+        G2_average = np.trapz(G2[:max_ya_crossing_index], yvalue[:max_ya_crossing_index]) / H if H != 0 else 0
         
 
         # Find the y-coordinate where alpha crosses below 1e-5
         # 首先筛选出 y > 0.005 的点
         y_threshold = 0.005
-        valid_mask = ya > y_threshold
+        valid_mask = yvalue > y_threshold
 
         if np.any(valid_mask):
             # 在有效范围内寻找 alpha < 1e-5 的点
@@ -175,27 +182,27 @@ def process_time_step(case_path, time_dir, output_dir, case_name):
                 # 转换为原始数组中的绝对索引
                 valid_indices = np.where(valid_mask)[0]
                 max_ya_crossing_index_alpha = valid_indices[first_below_rel_index]
-                y_crossing_alpha = ya[max_ya_crossing_index_alpha]  # 修正变量名
-                u_crossing_alpha = ua_x[max_ya_crossing_index_alpha]
+                y_crossing_alpha = yvalue[max_ya_crossing_index_alpha]  # 修正变量名
+                u_crossing_alpha = uavalue[max_ya_crossing_index_alpha]
                 #print(f"Found y_crossing at {y_crossing_alpha} for xx={xx}")
             else:
                 # 如果没有找到，使用有效范围内的最大y值
                 max_ya_crossing_index_alpha = np.where(valid_mask)[0][-1]
-                y_crossing_alpha = ya[max_ya_crossing_index_alpha]  # 修正变量名
-                u_crossing_alpha = ua_x[max_ya_crossing_index_alpha]
+                y_crossing_alpha = yvalue[max_ya_crossing_index_alpha]  # 修正变量名
+                u_crossing_alpha = uavalue[max_ya_crossing_index_alpha]
                 #print(f"No alpha < {alpha_threshold} found above y={y_threshold} for xx={xx}, using max y={y_crossing_alpha}")
         else:
             # 如果没有y>0.005的点，使用最后一个点
-            max_ya_crossing_index_alpha = len(ya) - 1
-            y_crossing_alpha = ya[max_ya_crossing_index_alpha]  # 修正变量名
-            u_crossing_alpha = ua_x[max_ya_crossing_index_alpha]  # 无法定义
+            max_ya_crossing_index_alpha = len(yvalue) - 1
+            y_crossing_alpha = yvalue[max_ya_crossing_index_alpha]  # 修正变量名
+            u_crossing_alpha = uavalue[max_ya_crossing_index_alpha]  # 无法定义
 
         # Vectorized integration
-        ua_alpha_alpha = ua_x * alpha_vals
-        integral_alpha = np.trapz(ua_alpha_alpha[:max_ya_crossing_index_alpha], ya[:max_ya_crossing_index_alpha])
-        integralU_alpha = np.trapz(ua_x[:max_ya_crossing_index_alpha], ya[:max_ya_crossing_index_alpha])
-        integralU2_alpha = np.trapz(ua_x[:max_ya_crossing_index_alpha]**2, ya[:max_ya_crossing_index_alpha])
-        integral2_alpha = np.trapz((ua_x[:max_ya_crossing_index_alpha] * alpha_vals[:max_ya_crossing_index_alpha])**2, ya[:max_ya_crossing_index_alpha])
+        ua_alpha_alpha = uavalue * alpha_vals
+        integral_alpha = np.trapz(ua_alpha_alpha[:max_ya_crossing_index_alpha], yvalue[:max_ya_crossing_index_alpha])
+        integralU_alpha = np.trapz(uavalue[:max_ya_crossing_index_alpha], yvalue[:max_ya_crossing_index_alpha])
+        integralU2_alpha = np.trapz(uavalue[:max_ya_crossing_index_alpha]**2, yvalue[:max_ya_crossing_index_alpha])
+        integral2_alpha = np.trapz((uavalue[:max_ya_crossing_index_alpha] * alpha_vals[:max_ya_crossing_index_alpha])**2, yvalue[:max_ya_crossing_index_alpha])
         
         # Calculate derived quantities
         U_alpha = integralU2_alpha / integralU_alpha if integralU_alpha != 0 else 0
@@ -205,10 +212,10 @@ def process_time_step(case_path, time_dir, output_dir, case_name):
 
         
         # Depth-averaged quantities
-        p_k_average_alpha = np.trapz(P_k[:max_ya_crossing_index_alpha], ya[:max_ya_crossing_index_alpha]) / H if H != 0 else 0
-        epsilon_average_alpha = np.trapz(epsilon_alpharho[:max_ya_crossing_index_alpha], ya[:max_ya_crossing_index_alpha]) / H if H != 0 else 0
-        G_average_alpha = np.trapz(G[:max_ya_crossing_index_alpha], ya[:max_ya_crossing_index_alpha]) / H if H != 0 else 0
-        G2_average_alpha = np.trapz(G2[:max_ya_crossing_index_alpha], ya[:max_ya_crossing_index_alpha]) / H if H != 0 else 0
+        p_k_average_alpha = np.trapz(P_k[:max_ya_crossing_index_alpha], yvalue[:max_ya_crossing_index_alpha]) / H if H != 0 else 0
+        epsilon_average_alpha = np.trapz(epsilon_alpharho[:max_ya_crossing_index_alpha], yvalue[:max_ya_crossing_index_alpha]) / H if H != 0 else 0
+        G_average_alpha = np.trapz(G[:max_ya_crossing_index_alpha], yvalue[:max_ya_crossing_index_alpha]) / H if H != 0 else 0
+        G2_average_alpha = np.trapz(G2[:max_ya_crossing_index_alpha], yvalue[:max_ya_crossing_index_alpha]) / H if H != 0 else 0
 
 
 
