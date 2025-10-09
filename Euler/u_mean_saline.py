@@ -5,553 +5,600 @@ import os
 from scipy.interpolate import griddata
 import matplotlib.pyplot as plt
 from scipy.ndimage import gaussian_filter
-from scipy.interpolate import RBFInterpolator
 from matplotlib.colors import TwoSlopeNorm
 
-### this code is used to calculate the mean velocity and perturbation velocity field of the turbidity current at every time step #####
-
-# 设置路径和输出目录
-#sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Middle_particle23/case230427_4"
-#sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Fine_particle9/case090429_1"
-#sol = "/home/amber/OpenFOAM/amber-v2306/Marino/case0704_4"
-sol = "/media/amber/PhD_data_xtsun/PhD/saline/case0704_6"
-output_dir = "/home/amber/postpro/u_umean_saline"
-os.makedirs(output_dir, exist_ok=True)
-
-# 参数设置
-alpha_threshold = 1e-4   # alpha.a 的头部阈值
-y_min = 0                # 垂向积分下限（避免壁面影响）
- 
-
-# 读取时间和网格
-#times = fluidfoam.get_time(sol)  # 自动获取所有时间步
-#times = sorted([float(t) for t in times if t.replace('.', '').isdigit()])
-# 读取网格数据 fludifoam.readmesh(sol) 读取的是网格中心点的数据而非网格节点的数据
-X, Y, Z = fluidfoam.readmesh(sol)
-xi = np.linspace(X.min(), X.max(), 500)
-yi = np.linspace(Y.min(), Y.max(), 3000)
-xi, yi = np.meshgrid(xi, yi)
-#times = [12,13,14] 
-#times = [15,16,17,18,19,20,21,22]
-times  = [10]
-#times = np.arange(5, 11, 2)
-
-    # 通用参数
-FIG_SIZE = (40, 6)
-X_LIM = (0, 2.5)
-ALPHA_CONTOUR_PARAMS = {
-        'levels': [1e-5],
-        'colors': 'black',
-        'linewidths': 2,
-        'linestyles': 'dashed',
-        'zorder': 3
-    }
-
-def calculate_q_criterion(dUx, dUy, dVx, dVy):
-    """
-    计算Q准则值
-    Q = 0.5*(||Ω||² - ||S||²)
-    其中 Ω = 0.5*(∇U - (∇U)^T) 是涡量张量
-         S = 0.5*(∇U + (∇U)^T) 是应变率张量
-    """
-
-
-    
-    # 计算应变率张量S和涡量张量Ω
-    S_xx = dUx
-    S_xy = 0.5*(dUy + dVx)
-    S_yx = S_xy
-    S_yy = dVy
-    
-    Omega_xy = 0.5*(dVx - dUy)
-    Omega_yx = -Omega_xy
-    
-    # 计算张量的Frobenius范数
-    S_norm = S_xx**2 + S_xy**2 + S_yx**2 + S_yy**2
-    Omega_norm = Omega_xy**2 + Omega_yx**2
-    
-    # 计算Q值
-    Q = 0.5*(Omega_norm - S_norm)
-    
-    return Q
-
-
-def signed(Q, omega_z):
-    """保持符号的平滑滤波"""
-    # 分离符号与幅值
-    sign = np.sign(omega_z)
-    magnitude = np.abs(omega_z)
-    
-
-    
-    # 重建带符号的涡量场
-    Q_signed_1 = sign * Q
-    
-    # 重新与Q准则结合
-    return np.where(Q > 0, Q_signed_1, np.nan)
-
-def signed_smooth(Q, omega_z, sigma=1.5):
-    """保持符号的平滑滤波"""
-    # 分离符号与幅值
-    sign = np.sign(omega_z)
-    magnitude = np.abs(omega_z)
-    
-    # 仅对幅值进行高斯滤波
-    magnitude_smooth = gaussian_filter(magnitude, sigma=sigma)
-    
-    # 重建带符号的涡量场
-    Q_signed = sign * magnitude_smooth
-    
-    # 重新与Q准则结合
-    return np.where(Q > 0, Q_signed, np.nan)
-
-
-
-
-#for time_v in times:
-for i in range(len(times)):
-    time_v = times[i]
-    # 读取场数据
-    Ua_A = fluidfoam.readvector(sol, str(time_v), "U")
-    alpha_A = fluidfoam.readscalar(sol, str(time_v), "alpha.saline")
-    gradU = fluidfoam.readtensor(sol, str(time_v), "grad(U)")
-    vorticity = fluidfoam.readvector(sol, str(time_v), "vorticity")
-    gradU_x = gradU[0]  # dUx/dx
-    gradU_y = gradU[3]  # dUx/dy
-    gradV_x = gradU[1]  # dUy/dx
-    gradV_y = gradU[4]  # dUy/dy
-    omega_z = vorticity[2]  # 计算二维流场的z方向涡量分量
-    
-    
-
-    # --- 定位头部位置（alpha.a ≈ alpha_threshold 的最大 x 坐标）---
-    head_x = None
-    for x in np.unique(X):
-        mask = (X == x) & (Y >= y_min) & (alpha_A > alpha_threshold)
-        if np.any(mask):
-            head_x = x
-    if head_x is None:
-        print(f"Warning: No head found at t={time_v}")
-        continue
-    #print( f"Processing time {time_v} with head_x={head_x:.3f}m")
-    #print(f"X d position at y={Y[0]} m")
-    #print(f"X ***d position at y={Y[1]} m")
-
-    # --- 遍历所有 x < head_x 的坐标 ---
-    results = []
-    x_coords = np.unique(X[(X <= head_x) & (X >= 0)])  # 仅处理有效 x 范围
-    for i, xx in enumerate(x_coords):
-        mask = (X == xx) & (alpha_A > 1e-5) & (Y > 0)
-        if not np.any(mask):
-            continue
+class SalineCurrentAnalyzer:
+    def __init__(self):
+        # Configuration parameters
+        #self.sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Middle_particle23/case230427_4"
+        self.sol = "/media/amber/PhD_data_xtsun/PhD/saline/case0704_6"
+        self.output_dir = "/home/amber/postpro/u_umean_saline"
+        self.alpha_threshold = 1e-5
+        self.y_min = 0
+        self.times = [7,10,12]
+        self.FIG_SIZE = (40, 8)
+        self.X_LIM = (0.0, 1.6)
+        self.Height = 0.3
         
-        ya = Y[mask]
-        ua = Ua_A[0][mask]
-        alpha = np.maximum(alpha_A[mask], 0)  # 确保 alpha ≥ 0
-
-        # 按 y 排序
-        sort_idx = np.argsort(ya)
-        ya = ya[sort_idx]
-        ua_x = ua[sort_idx]
-        alpha_vals = alpha[sort_idx]
-
-
-        # Find the front height
-        # Find the front height with y > 0.005 condition
-        y_threshold = 0.005  # 定义y的阈值
-
-        # 找到速度符号变化的点（仅考虑y > y_threshold的区域）
-        valid_mask = ya > y_threshold
-        sign_changes = np.where(np.diff(np.sign(ua[valid_mask])))[0]
+        # Visualization parameters
+        self.ALPHA_CONTOUR_PARAMS = {
+            'levels': [1e-5],
+            'colors': 'black',
+            'linewidths': 2,
+            'linestyles': 'dashed',
+            'zorder': 3
+        }
         
+        # Initialize global plot settings
+        plt.rcParams.update({
+            'font.size': 28,
+            'axes.titlesize': 28,
+            'axes.labelsize': 24,
+            'xtick.labelsize': 24,
+            'ytick.labelsize': 24,
+            'legend.fontsize': 24
+        })
+
+    def calculate_q_criterion(self, dUx, dUy, dVx, dVy):
+        """Calculate Q-criterion value"""
+        S_xx = dUx
+        S_xy = 0.5*(dUy + dVx)
+        S_yx = S_xy
+        S_yy = dVy
+        
+        Omega_xy = 0.5*(dVx - dUy)
+        Omega_yx = -Omega_xy
+        
+        S_norm = S_xx**2 + S_xy**2 + S_yx**2 + S_yy**2
+        Omega_norm = Omega_xy**2 + Omega_yx**2
+        
+        return 0.5*(Omega_norm - S_norm)
+
+    def signed_smooth(self, Q, omega_z, sigma=1.5):
+        """Smooth while preserving sign"""
+        sign = np.sign(omega_z)
+        magnitude = np.abs(omega_z)
+        magnitude_smooth = gaussian_filter(magnitude, sigma=sigma)
+        return np.where(Q > 0, sign * magnitude_smooth, np.nan)
+
+    def integrate_quantities(self, ya, ua_x, alpha_vals):
+        """Perform vertical integration of quantities"""
+            # Find front height (where velocity crosses zero AND y > 0.005)
+        velocity_sign_changes = np.diff(np.sign(ua_x)) != 0  # 速度符号变化的点 (n-1)
+        valid_height_mask = ya[:-1] > 0.05                  # 排除 y <= 0.005 的点 (n-1)
+        
+        # 逻辑与合并条件（注意 ya[:-1] 因为 diff 结果长度是 n-1）
+        sign_changes = np.where(np.logical_and(velocity_sign_changes, valid_height_mask))[0]
+        
+        # 获取最高位置的交点（若无交点则用最后一个点）
         max_ya_crossing_index = sign_changes[np.argmax(ya[sign_changes])] + 1 if len(sign_changes) > 0 else len(ya) - 1
-        y_crossing = ya[max_ya_crossing_index]
-        u_crossing = ua[max_ya_crossing_index]
 
+   
+        
         # Vectorized integration
-        ua_alpha = ua * alpha
+        ua_alpha = ua_x * alpha_vals
         integral = np.trapz(ua_alpha[:max_ya_crossing_index], ya[:max_ya_crossing_index])
-        integralU = np.trapz(ua[:max_ya_crossing_index], ya[:max_ya_crossing_index])
-        integralU2 = np.trapz(ua[:max_ya_crossing_index]**2, ya[:max_ya_crossing_index])
-        integral2 = np.trapz((ua[:max_ya_crossing_index] * alpha[:max_ya_crossing_index])**2, ya[:max_ya_crossing_index])
+        integralU = np.trapz(ua_x[:max_ya_crossing_index], ya[:max_ya_crossing_index])
+        integralU2 = np.trapz(ua_x[:max_ya_crossing_index]**2, ya[:max_ya_crossing_index])
+        integral2 = np.trapz((ua_x[:max_ya_crossing_index] * alpha_vals[:max_ya_crossing_index])**2, ya[:max_ya_crossing_index])
         
         # Calculate derived quantities
         U = integralU2 / integralU if integralU != 0 else 0
         H = integral**2 / integral2 if integral2 != 0 else 0
         ALPHA = integral / integralU if integralU != 0 else 0
         H_depth = integralU**2 / integralU2 if integralU2 != 0 else 0
-
-
-        # 首先筛选出 y > 0.005 的点
-        y_threshold = 0.005
-        valid_mask = ya > y_threshold
-
-        if np.any(valid_mask):
-            # 在有效范围内寻找 alpha < 1e-5 的点
-            alpha_threshold = 1e-5
-            below_threshold = (alpha[valid_mask] < alpha_threshold)
-            
-            if np.any(below_threshold):
-                # 找到第一个满足条件的点的相对索引
-                first_below_rel_index = np.argmax(below_threshold)
-                # 转换为原始数组中的绝对索引
-                valid_indices = np.where(valid_mask)[0]
-                max_ya_crossing_index_alpha = valid_indices[first_below_rel_index]
-                y_crossing_alpha = ya[max_ya_crossing_index_alpha]  # 修正变量名
-                u_crossing_alpha = ua[max_ya_crossing_index_alpha]
-                #print(f"Found y_crossing at {y_crossing_alpha} for xx={xx}")
-            else:
-                # 如果没有找到，使用有效范围内的最大y值
-                max_ya_crossing_index_alpha = np.where(valid_mask)[0][-1]
-                y_crossing_alpha = ya[max_ya_crossing_index_alpha]  # 修正变量名
-                u_crossing_alpha = ua[max_ya_crossing_index_alpha]
-                #print(f"No alpha < {alpha_threshold} found above y={y_threshold} for xx={xx}, using max y={y_crossing_alpha}")
-        else:
-            # 如果没有y>0.005的点，使用最后一个点
-            max_ya_crossing_index_alpha = len(ya) - 1
-            y_crossing_alpha = ya[max_ya_crossing_index_alpha]  # 修正变量名
-            u_crossing_alpha = ua[max_ya_crossing_index_alpha]  # 无法定义
-
-        # Vectorized integration
-        ua_alpha_alpha = ua * alpha
-        integral_alpha = np.trapz(ua_alpha_alpha[:max_ya_crossing_index_alpha], ya[:max_ya_crossing_index_alpha])
-        integralU_alpha = np.trapz(ua[:max_ya_crossing_index_alpha], ya[:max_ya_crossing_index_alpha])
-        integralU2_alpha = np.trapz(ua[:max_ya_crossing_index_alpha]**2, ya[:max_ya_crossing_index_alpha])
-        integral2_alpha = np.trapz((ua[:max_ya_crossing_index_alpha] * alpha[:max_ya_crossing_index_alpha])**2, ya[:max_ya_crossing_index_alpha])
         
-        # Calculate derived quantities
-        U_alpha = integralU2_alpha / integralU_alpha if integralU_alpha != 0 else 0
-        H_alpha = integral_alpha**2 / integral2_alpha if integral2_alpha != 0 else 0
-        ALPHA_alpha = integral_alpha / integralU_alpha if integralU_alpha != 0 else 0
-        H_depth_alpha = integralU_alpha**2 / integralU2_alpha if integralU2_alpha != 0 else 0
+        return U, H, ALPHA, H_depth, ya[max_ya_crossing_index]
+
+    def calculate_perturbation_fields(self, X, Y, Ua_A, x_coords, x_U_mapping, x_U_mapping_alpha, gradbeta_x, omega_z, gradvorticity_x, beta):
+        """Calculate perturbation velocity and advection fields"""
+        U_perturb = Ua_A[0].copy()
+        U_perturb_alpha = Ua_A[0].copy()
+        U_mean_grid = np.zeros_like(omega_z)
+        Umean_densitygradient = np.zeros_like(omega_z)
+        Uper_densitygradient = np.zeros_like(omega_z)
+        Umean_advection = np.zeros_like(omega_z)
+        Uper_advection = np.zeros_like(omega_z)
+        Uori_advection = Ua_A[0] * gradvorticity_x * beta
+
+        for x in x_coords:
+            if x in x_U_mapping:
+                mask = (X == x)
+                U_mean = x_U_mapping[x]
+                U_mean_alpha = x_U_mapping_alpha[x]
+                
+                U_perturb[mask] = Ua_A[0][mask] - U_mean
+                U_perturb_alpha[mask] = Ua_A[0][mask] - U_mean_alpha
+                U_mean_grid[mask] = U_mean
+                Umean_densitygradient[mask] = U_mean * gradbeta_x[mask] * 2 * omega_z[mask]
+                Uper_densitygradient[mask] = U_perturb[mask] * gradbeta_x[mask] * 2 * omega_z[mask]
+                Umean_advection[mask] = U_mean * gradvorticity_x[mask]*beta[mask]
+                Uper_advection[mask] = U_perturb[mask] * gradvorticity_x[mask]*beta[mask]
+
+        return U_perturb, U_perturb_alpha, Umean_densitygradient, Uper_densitygradient, Umean_advection, Uper_advection, Uori_advection
+
+    def interpolate_fields(self, X, Y, xi, yi, fields):
+        """Interpolate fields to regular grid"""
+        return {name: griddata((X, Y), field, (xi, yi), method='linear') 
+                for name, field in fields.items()}
+
+    def plot_streamlines(self, xi, yi, ux, uy, color_field, alpha_i, time_v, positions, y_text, 
+                        title, filename, color_label, vmin=None, vmax=None):
+        """Generic streamline plotting function"""
+        plt.figure(figsize=self.FIG_SIZE)
+        
+        if vmin is not None and vmax is not None:
+            color_field = np.clip(color_field, vmin, vmax)
+        
+        strm = plt.streamplot(
+            xi, yi, ux, uy,
+            color=color_field,
+            cmap=plt.cm.rainbow,
+            linewidth=1,
+            density=8,
+            arrowsize=3,
+            arrowstyle='->',
+            zorder=1
+        )
+        
+        plt.contour(xi, yi, alpha_i, **self.ALPHA_CONTOUR_PARAMS)
+
+        for label, x_pos in positions.items():
+            plt.axvline(x=x_pos, color='b', linestyle='dashdot', linewidth=1, zorder=3)
+            plt.text(x_pos + 0.01, y_text, f'{label}', fontsize=15, zorder=3, color='b')
+        
+        cbar = plt.colorbar(strm.lines, label=color_label)
+        plt.xlabel('x [m]')
+        plt.ylabel('y [m]')
+        plt.xlim(*self.X_LIM)
+        plt.title(title)
+        plt.savefig(os.path.join(self.output_dir, filename), dpi=300, bbox_inches='tight')
+        plt.close()
+
+    def plot_contour(self, xi, yi, field, alpha_i, time_v, positions, y_text, 
+                     title, filename, color_label, levels=None, cmap='bwr'):
+        """Generic contour plotting function"""
+        plt.figure(figsize=self.FIG_SIZE)
+        
+        if levels is None:
+            levels = np.linspace(np.nanmin(field), np.nanmax(field), 21)
+        
+        contour = plt.contourf(
+            xi, yi, field,
+            levels=levels,
+            cmap=cmap,
+            extend='both'
+        )
+        
+        plt.contour(xi, yi, alpha_i, **self.ALPHA_CONTOUR_PARAMS)
+        
+        for label, x_pos in positions.items():
+            plt.axvline(x=x_pos, color='b', linestyle='dashdot', linewidth=1, zorder=3)
+            plt.text(x_pos + 0.01, y_text, f'{label}', fontsize=15, zorder=3, color='b')
+        
+        cbar = plt.colorbar(contour, label=color_label)
+        plt.xlabel('x [m]')
+        plt.ylabel('y [m]')
+        plt.xlim(*self.X_LIM)
+        plt.title(title)
+        plt.savefig(os.path.join(self.output_dir, filename), dpi=300, bbox_inches='tight')
+        plt.close()
 
 
 
 
-        results.append({
-            "Time": time_v,
-            "x": xx,
-            "U": U,
-            "H": H,
-            "ALPHA": ALPHA,
-            "y_crossing": y_crossing,
-            "U_alpha"   : U_alpha,
-            "H_alpha"   : H_alpha,
-            "ALPHA_alpha": ALPHA_alpha,
-            "y_crossing_alpha": y_crossing_alpha
-        })
+    def plot_velocity_vectors(
+            self, xi, yi, ux, uy, alpha_i, time_v, positions, y_text,
+        title, filename, skip_x=3, skip_y=3, vector_color='red', scale=1.0,
+            arrow_scale=1.0, alpha_opacity=0.6, alpha_cmap='gray_r',velocity_zero_points=None
+        ):
+        """
+        Plot velocity vectors with proper arrowheads and speed-proportional lengths.
+        
+        Parameters:
+            scale : float
+                Larger values make arrows shorter (e.g., 50 = medium, 100 = short).
+            skip_x, skip_y : int
+                Sampling step (higher = fewer arrows).
+            color : str or array-like
+                Color of arrows (can be a colormap).
+        """
+        plt.figure(figsize=self.FIG_SIZE)
+        
 
 
-    # 保存当前时间步的结果
-    df = pd.DataFrame(results)
-    df.to_csv(os.path.join(output_dir, f"integration_results_t{time_v}.csv"), index=False)
-    print(f"Results saved for t={time_v} (head_x={head_x:.2f}m)")
+        # Mask regions where alpha < threshold (no arrows)
+        alpha_mask = alpha_i > self.alpha_threshold
+        masked_ux = np.where(alpha_mask, ux, np.nan)
+        masked_uy = np.where(alpha_mask, uy, np.nan)
+        masked_alpha = np.where(alpha_mask, alpha_i, np.nan)
 
-    
-    
-    # --- 计算速度扰动 U_a' = U_a - U(x) ---
-    # 从DataFrame中获取U值，并创建x到U的映射
-    x_U_mapping = dict(zip(df['x'], df['U']))
-    x_U_mapping_alpha = dict(zip(df['x'], df['U_alpha']))
-    
-    #U_perturb = np.zeros_like(Ua_A[0])
-    U_perturb = Ua_A[0].copy()  # 直接使用 Ua_A[0] 的形状
-    for x in x_coords:
-        if x in x_U_mapping:  # 确保x在计算结果中
-            mask = (X == x)
-            U_perturb[mask] = Ua_A[0][mask] - x_U_mapping[x]
+        # Compute speed (magnitude of velocity)
+        # 计算速度大小
+        speed = np.sqrt(ux**2 + uy**2)
+        
+        # 归一化速度分量（保持方向，长度 = speed）
+        max_speed = np.nanmax(speed)  # 避免除以零
+        normalized_ux = (ux / max_speed) * arrow_scale
+        normalized_uy = (uy / max_speed) * arrow_scale
 
-    U_perturb_alpha = Ua_A[0].copy()  # 直接使用 Ua_A[0] 的形状
-    for x in x_coords:
-        if x in x_U_mapping_alpha:  # 确保x在计算结果中
-            mask = (X == x)
-            U_perturb_alpha[mask] = Ua_A[0][mask] - x_U_mapping_alpha[x]
+        # 1. Plot alpha concentration cloud map (background)
+        cf = plt.contourf(
+        xi, yi, alpha_i,
+        levels=np.linspace(0, 0.012, 128),                   # 颜色分级数
+        cmap=alpha_cmap,              # 云图颜色映射
+        alpha=alpha_opacity,          # 透明度
+        antialiased=True              # 抗锯齿
+        )
+        cbar = plt.colorbar(cf, label=r'$\alpha_s$',orientation='horizontal')
+        cbar.ax.tick_params(labelsize=10)
+        cbar.set_label( label=r'$\alpha_s$',fontsize=11)
+        cbar.set_ticks([0.000, 0.006, 0.012])
+        cbar.ax.set_position([0.75, 0.7, 0.2, 0.02])  # [left, bottom, width, height]
 
-    # --- 插值到规则网格（可选，使绘图更平滑）---
-    
-    U_perturb_i = griddata((X, Y), U_perturb, (xi, yi), method='cubic')
-    U_perturb_i_alpha = griddata((X, Y), U_perturb_alpha, (xi, yi), method='cubic')
-    # 插值原始速度场（用于流线方向）
-    uxi = griddata((X, Y), Ua_A[0], (xi, yi), method='linear')  # Ux 分量
-    uyi = griddata((X, Y), Ua_A[1], (xi, yi), method='linear')  # Uy 分量
-    alpha_i = griddata((X, Y), alpha_A, (xi, yi), method='linear')
-    vorticity_i = griddata((X, Y), omega_z, (xi, yi), method='linear')
-    
+        # 绘制长度随 speed 变化的矢量
+        q = plt.quiver(
+            xi[::skip_y, ::skip_x], yi[::skip_y, ::skip_x],
+            normalized_ux[::skip_y, ::skip_x],  # 归一化后的分量
+            normalized_uy[::skip_y, ::skip_x],
+            speed[::skip_y, ::skip_x],  # 仍用于颜色映射（可选）
+            scale=scale,                # 设为 1.0 或更小的基础缩放
+            scale_units='inches',       # 固定物理长度单位
+            angles='xy',                # 确保方向正确
+            width=0.0005 * arrow_scale,  # 箭头宽度
+            headwidth=5 * arrow_scale,  # 头部宽度
+            headlength=7 * arrow_scale, # 头部长度
+            headaxislength=4.5 * arrow_scale,
+            #color=vector_color,         # 统一颜色（或用 cmap 映射 speed）
+            #edgecolor='k',              # 黑色描边增强对比
+            linewidth=0.8,
+            cmap='cool' #if vector_color is None else None  # 可选颜色映射
+        )
+        #plt.colorbar(q, label='Velocity Magnitude')
+         # 添加速度颜色图例（quiver专用colorbar）
+        cbar_speed = plt.colorbar(q, label='Velocity Magnitude [m/s]',orientation='horizontal')
+        cbar_speed.ax.tick_params(labelsize=10)
+        cbar_speed.set_label('Velocity Magnitude [m/s]', fontsize=11)
+        cbar_speed.set_ticks([0, 0.15/2, 0.15])
+        cbar_speed.ax.set_position([0.75, 0.8, 0.2, 0.02])  # [left, bottom, width, height]
 
-    # 计算Q准则
-    Q = calculate_q_criterion(gradU_x, gradU_y, gradV_x, gradV_y)
-    Q_i = griddata((X, Y), Q, (xi, yi), method='linear')
-
-    Q_signed = signed(Q, omega_z)
-    Q_signed_i = griddata((X, Y), Q_signed, (xi, yi), method='linear')
-
-    Q_signed_smoothed = signed_smooth(Q, omega_z, sigma=1.5)
-    Q_signed_smoothed_i = griddata((X, Y), Q_signed_smoothed, (xi, yi), method='linear')
-    
-
-
-    # 全局绘图参数设置
-    plt.rcParams.update({
-        'font.size': 28,
-        'axes.titlesize': 28,
-        'axes.labelsize': 24,
-        'xtick.labelsize': 24,
-        'ytick.labelsize': 24,
-        'legend.fontsize': 24
-    })
-
-
-    H = 0.3
-    positions = {
-        '1/6H': head_x - (1/6)*H,
-        '1/4H': head_x - 0.25*H,
-        '1/2H': head_x - 0.5*H,
-        'H': head_x - H
-    }
-    
-    y_text = 0.32
-    
-    
-
-# #def plot_velocity_vectors(X, Y, U_perturb, Ua_A, xi, yi, alpha_i, time_v, output_dir):
-    
-#     """绘制速度矢量图"""
-#     plt.figure(figsize=FIG_SIZE)
-    
-#     # 矢量场参数
-#     skip = 5
-#     scale = 20
-#     width = 0.002
-    
-#     plt.quiver(
-#         X[::skip], Y[::skip],
-#         U_perturb[::skip], Ua_A[1][::skip],
-#         scale=scale,
-#         width=width,
-#         color='blue'
-#     )
-    
-#     if 'alpha_i' in locals():
-#         plt.contour(xi, yi, alpha_i, **ALPHA_CONTOUR_PARAMS)
-
-#     for label, x_pos in positions.items():
-#         plt.axvline(x=x_pos, color='b', linestyle='dashdot', linewidth=1, zorder=3)
-#         plt.text(x_pos + 0.01, y_text, f'{label}', 
-#                 fontsize=15, zorder=3, color='b')
-#         #y_text += 0.04    
-    
-#     plt.xlabel('x [m]')
-#     plt.ylabel('y [m]')
-#     plt.xlim(*X_LIM)
-#     plt.title(f'Velocity Vectors (t={time_v}) - No Interpolation')
-#     plt.savefig(os.path.join(output_dir, f'velocity_vectors_t{time_v}.png'), 
-#               dpi=300, bbox_inches='tight')
-#     plt.close()
-
-
-    """绘制扰动速度流线图"""
-    plt.figure(figsize=FIG_SIZE)
-    
-    # 归一化和缩放
-    magnitude = np.sqrt(U_perturb_i**2 + uyi**2)
-    U_perturb_i_norm = np.where(magnitude > 0, U_perturb_i / magnitude, 0)
-    U_perturb_i_scaled = np.clip(U_perturb_i, -0.02, 0.02)
-    
-    strm = plt.streamplot(
-        xi, yi, U_perturb_i, uyi,
-        color=U_perturb_i_scaled,
-        cmap=plt.cm.rainbow,
-        linewidth=1,
-        density=8,
-        arrowsize=3,
-        arrowstyle='->',
-        zorder=1
-    )
-    
-    plt.contour(xi, yi, alpha_i, **ALPHA_CONTOUR_PARAMS)
-
-    for label, x_pos in positions.items():
-        plt.axvline(x=x_pos, color='b', linestyle='dashdot', linewidth=1, zorder=3)
-        plt.text(x_pos + 0.01, y_text, f'{label}', 
-                fontsize=15, zorder=3, color='b')
-        #y_text += 0.04
-    
-    cbar = plt.colorbar(strm.lines, label="Velocity Perturbation $U_a\'$ [m/s]")
-    plt.xlabel('x [m]')
-    plt.ylabel('y [m]')
-    plt.xlim(*X_LIM)
-    plt.title(f'Perturbation Velocity Streamlines (t={time_v})')
-    plt.savefig(os.path.join(output_dir, f'perturbation_streamlines_t{time_v}.png'), 
-              dpi=300, bbox_inches='tight')
-    plt.close()
-
-    """绘制扰动速度流线图alpha"""
-    plt.figure(figsize=FIG_SIZE)
-    
-    # 归一化和缩放
-    magnitude = np.sqrt(U_perturb_i_alpha**2 + uyi**2)
-    U_perturb_i_norm = np.where(magnitude > 0, U_perturb_i_alpha / magnitude, 0)
-    U_perturb_i_alphascaled = np.clip(U_perturb_i_alpha, -0.02, 0.02)
-    
-    strm = plt.streamplot(
-        xi, yi, U_perturb_i_alpha, uyi,
-        color=U_perturb_i_alphascaled,
-        cmap=plt.cm.rainbow,
-        linewidth=1,
-        density=8,
-        arrowsize=3,
-        arrowstyle='->',
-        zorder=1
-    )
-    
-    plt.contour(xi, yi, alpha_i, **ALPHA_CONTOUR_PARAMS)
-
-    for label, x_pos in positions.items():
-        plt.axvline(x=x_pos, color='b', linestyle='dashdot', linewidth=1, zorder=3)
-        plt.text(x_pos + 0.01, y_text, f'{label}', 
-                fontsize=15, zorder=3, color='b')
-        #y_text += 0.04
-    
-    cbar = plt.colorbar(strm.lines, label="Velocity Perturbation $U_aaalpha\'$ [m/s]")
-    plt.xlabel('x [m]')
-    plt.ylabel('y [m]')
-    plt.xlim(*X_LIM)
-    plt.title(f'Perturbation Velocity Streamlines alpha (t={time_v})')
-    plt.savefig(os.path.join(output_dir, f'perturbation_streamlines_alpha_t{time_v}.png'), 
-              dpi=300, bbox_inches='tight')
-    plt.close()
-
-
-    """绘制原始速度流线图"""
-    plt.figure(figsize=FIG_SIZE)
-    uxi_scaled = np.clip(uxi, -0.12, 0.12)
-    
-    strm = plt.streamplot(
-        xi, yi, uxi, uyi,
-        color=uxi_scaled,
-        cmap=plt.cm.rainbow,
-        linewidth=1,
-        density=5,
-        arrowsize=2,
-        arrowstyle='->',
-        zorder=2
-    )
-    
-    plt.contour(xi, yi, alpha_i, **ALPHA_CONTOUR_PARAMS)
-
-    for label, x_pos in positions.items():
-        plt.axvline(x=x_pos, color='b', linestyle='dashdot', linewidth=1, zorder=3)
-        plt.text(x_pos + 0.01, y_text, f'{label}', 
-                fontsize=15, zorder=3, color='b')
-        #y_text += 0.04
-    
-    cbar = plt.colorbar(strm.lines, 
-                       label="Velocity streamline $U_a$ [m/s]")
-    plt.xlabel('x [m]')
-    plt.ylabel('y [m]')
-    plt.xlim(*X_LIM)
-    plt.title(f'Original Velocity Streamlines (t={time_v})')
-    plt.savefig(os.path.join(output_dir, f'origin_streamlines_t{time_v}.png'), 
-              dpi=300, bbox_inches='tight')
-    plt.close()
-
-
-    """omega_z"""
-    plt.figure(figsize=FIG_SIZE)
-    
-    V_levels = np.linspace(-10.5, 10.5, 81)
-    V_contour = plt.contourf(
-        xi, yi, vorticity_i,
-        levels=V_levels,
-        cmap='bwr',
-        extend='both'
-    )
-    
-    plt.contour(xi, yi, alpha_i, **ALPHA_CONTOUR_PARAMS)
-    
-
-    
-    
-    for label, x_pos in positions.items():
-        plt.axvline(x=x_pos, color='b', linestyle='dashdot', linewidth=1, zorder=3)
-        plt.text(x_pos + 0.01, y_text, f'{label}', 
-                fontsize=15, zorder=3, color='b')
-        #y_text += 0.04
-    
-    cbar = plt.colorbar(V_contour, label='$\omega_z$')
-    plt.xlabel('x [m]')
-    plt.ylabel('y [m]')
-    plt.xlim(*X_LIM)
-    plt.title(f'Vorticity (t={time_v})')
-    plt.savefig(os.path.join(output_dir, f'Vorticity_t{time_v}.png'), 
-              dpi=300, bbox_inches='tight')
-    plt.close()
+            # === 3. 添加箭头长度的参考图例 ===
+        # 手动在角落添加参考箭头（需计算实际物理长度）
+        ref_speed = 0.15  # 示例参考速度（可自定义）
+        ref_x, ref_y = 0.9, 0.95    # 图例位置（相对坐标）
+        ref_arrow = plt.quiver(
+            ref_x, ref_y,
+            ref_speed / max_speed * arrow_scale, 0,  # 水平箭头
+            color='k', scale=3, scale_units='inches',
+            width=0.0005 * arrow_scale,  # 加粗显示
+            headwidth=5 * arrow_scale,
+            transform=plt.gca().transAxes  # 使用相对坐标
+        )
+        plt.text(
+            ref_x + 0.02, ref_y,
+            f'{ref_speed:.2f} m/s',
+            transform=plt.gca().transAxes,
+            va='center', ha='left',
+            fontsize=11,
+        )
 
 
 
-    # """绘制优化后的Q准则涡分布图"""
-    
+        # 3. Overlay alpha contour
+        c=plt.contour(xi, yi, alpha_i, **self.ALPHA_CONTOUR_PARAMS)
+        
 
-    # plt.figure(figsize=FIG_SIZE)
-    
-    # Q_levels = np.linspace(-1.5, 1.5, 11)
-    # Q_contour_signed = plt.contourf(
-    #     xi, yi, Q_signed_i,
-    #     levels=Q_levels,
-    #     cmap='bwr',
-    #     extend='both'
-    # )
-    
-    # plt.contour(xi, yi, alpha_i, **ALPHA_CONTOUR_PARAMS)
-
-    # for label, x_pos in positions.items():
-    #     plt.axvline(x=x_pos, color='b', linestyle='dashdot', linewidth=1, zorder=3)
-    #     plt.text(x_pos + 0.01, y_text, f'{label}', 
-    #             fontsize=15, zorder=3, color='b')
-    #     #y_text += 0.04
-    
-    # cbar = plt.colorbar(Q_contour_signed, label='Q-Criterion')
-    # plt.xlabel('x [m]')
-    # plt.ylabel('y [m]')
-    # plt.xlim(*X_LIM)
-    # plt.title(f'Q-Criterion Contours_signed (t={time_v})')
-    # plt.savefig(os.path.join(output_dir, f'Q_criterion_t{time_v}_signed.png'), 
-    #           dpi=300, bbox_inches='tight')
-    # plt.close()
-
-    # """绘制考虑涡量后的Q准则涡分布图"""
-    
-
-    # plt.figure(figsize=FIG_SIZE)
-    
-    # Q_levels = np.linspace(-5, 5, 41)
-    # Q_contour_signed = plt.contourf(
-    #     xi, yi, Q_signed_smoothed_i,
-    #     levels=Q_levels,
-    #     cmap='bwr',
-    #     extend='both'
-    # )
-    
-    # plt.contour(xi, yi, alpha_i, **ALPHA_CONTOUR_PARAMS)
-
-    # for label, x_pos in positions.items():
-    #     plt.axvline(x=x_pos, color='b', linestyle='dashdot', linewidth=1, zorder=3)
-    #     plt.text(x_pos + 0.01, y_text, f'{label}', 
-    #             fontsize=15, zorder=3, color='b')
-    #     #y_text += 0.04
-    
-    # cbar = plt.colorbar(Q_contour_signed, label='Q-Criterion')
-    # plt.xlabel('x [m]')
-    # plt.ylabel('y [m]')
-    # plt.xlim(*X_LIM)
-    # plt.title(f'Vortex indentification via Q_criterion with vorticity magnitude (t={time_v})')
-    # plt.savefig(os.path.join(output_dir, f'Q_criterion_t{time_v}_signed_omega.png'), 
-    #           dpi=300, bbox_inches='tight')
-    # plt.close()
+        # # 4. Add reference lines/labels
+        # for label, x_pos in positions.items():
+        #     plt.axvline(x=x_pos, color='b', linestyle=':', linewidth=0.8)
+        #     plt.text(x_pos + 0.01, y_text, label, fontsize=12, color='b')
 
 
-print(f"All results saved to: {output_dir}")
+            # === 新增：绘制速度零点连线 ===
+        if velocity_zero_points and len(velocity_zero_points) > 0:
+            zero_x, zero_y = zip(*velocity_zero_points)
+            
+            # 按 x 坐标排序以确保连线顺序正确
+            sorted_indices = np.argsort(zero_x)
+            zero_x_sorted = np.array(zero_x)[sorted_indices]
+            zero_y_sorted = np.array(zero_y)[sorted_indices]
+            
+            # 绘制虚线
+            plt.plot(
+                zero_x_sorted, zero_y_sorted,
+                color='red',               # 蓝色虚线（可自定义）
+                linestyle='--',
+                linewidth=2,
+                label='Velocity Zero Crossing',
+                zorder=4                    # 确保在箭头上方
+            )    
 
 
 
-#print(f"All results saved to: {output_dir}")
+        plt.xlabel('x [m]')
+        plt.ylabel('y [m]')
+        plt.xlim(*self.X_LIM)
+        plt.title(title)
+        plt.savefig(os.path.join(self.output_dir, filename), dpi=300, bbox_inches='tight')
+        plt.close()
+
+
+
+
+    def process_time_step(self, time_v):
+        """Process data for a single time step"""
+        # Read field data
+        Ua_A = fluidfoam.readvector(self.sol, str(time_v), "U")
+        alpha_A = fluidfoam.readscalar(self.sol, str(time_v), "alpha.saline")
+        beta = 1-fluidfoam.readscalar(self.sol, str(time_v), "alpha.saline")
+        gradU = fluidfoam.readtensor(self.sol, str(time_v), "grad(U)")
+        vorticity = fluidfoam.readvector(self.sol, str(time_v), "vorticity")
+        gradbeta = fluidfoam.readvector(self.sol, str(time_v), "grad(alpha.saline)")
+        gradvorticity = fluidfoam.readtensor(self.sol, str(time_v), "grad(vorticity)")
+
+        # Extract components
+        gradU_x = gradU[0]
+        gradU_y = gradU[3]
+        gradV_x = gradU[1]
+        gradV_y = gradU[4]
+        omega_z = vorticity[2]
+        gradbeta_x = gradbeta[0]
+        gradvorticity_x = gradvorticity[2]
+        gradvorticity_y = gradvorticity[5]
+
+        velocity_zero_points = []
+
+        # Locate head position
+        X, Y, Z = fluidfoam.readmesh(self.sol)
+        head_x = None
+        for x in np.unique(X):
+            mask = (X == x) & (Y >= self.y_min) & (alpha_A > self.alpha_threshold)
+            if np.any(mask):
+                head_x = x
+        if head_x is None:
+            print(f"Warning: No head found at t={time_v}")
+            return
+
+        # Process each x coordinate
+        results = []
+        x_coords = np.unique(X[(X <= head_x) & (X >= 0)])
+        
+        for xx in x_coords:
+            mask = (X == xx) & (alpha_A > 1e-5) & (Y > 0)
+            if not np.any(mask):
+                continue
+            
+            ya = Y[mask]
+            ua = Ua_A[0][mask]
+            alpha = np.maximum(alpha_A[mask], 0)
+            
+            # Sort by y
+            sort_idx = np.argsort(ya)
+            ya = ya[sort_idx]
+            ua_x = ua[sort_idx]
+            alpha_vals = alpha[sort_idx]
+
+            # Calculate quantities
+            U, H, ALPHA, H_depth, y_crossing = self.integrate_quantities(ya, ua_x, alpha_vals)
+            
+            # Additional calculations for alpha crossing
+            y_threshold = 0.005
+            valid_mask = ya > y_threshold
+            if np.any(valid_mask):
+                below_threshold = (alpha_vals[valid_mask] < 1e-5)
+                if np.any(below_threshold):
+                    first_below_rel_index = np.argmax(below_threshold)
+                    valid_indices = np.where(valid_mask)[0]
+                    max_ya_crossing_index_alpha = valid_indices[first_below_rel_index]
+                    y_crossing_alpha = ya[max_ya_crossing_index_alpha]
+                    u_crossing_alpha = ua_x[max_ya_crossing_index_alpha]
+                else:
+                    max_ya_crossing_index_alpha = np.where(valid_mask)[0][-1]
+                    y_crossing_alpha = ya[max_ya_crossing_index_alpha]
+                    u_crossing_alpha = ua_x[max_ya_crossing_index_alpha]
+            else:
+                max_ya_crossing_index_alpha = len(ya) - 1
+                y_crossing_alpha = ya[max_ya_crossing_index_alpha]
+                u_crossing_alpha = ua_x[max_ya_crossing_index_alpha]
+
+            # Additional integrations for alpha crossing
+            ua_alpha_alpha = ua_x * alpha_vals
+            integral_alpha = np.trapz(ua_alpha_alpha[:max_ya_crossing_index_alpha], ya[:max_ya_crossing_index_alpha])
+            integralU_alpha = np.trapz(ua_x[:max_ya_crossing_index_alpha], ya[:max_ya_crossing_index_alpha])
+            integralU2_alpha = np.trapz(ua_x[:max_ya_crossing_index_alpha]**2, ya[:max_ya_crossing_index_alpha])
+            integral2_alpha = np.trapz((ua_x[:max_ya_crossing_index_alpha] * alpha_vals[:max_ya_crossing_index_alpha])**2, ya[:max_ya_crossing_index_alpha])
+            
+            U_alpha = integralU2_alpha / integralU_alpha if integralU_alpha != 0 else 0
+            H_alpha = integral_alpha**2 / integral2_alpha if integral2_alpha != 0 else 0
+            ALPHA_alpha = integral_alpha / integralU_alpha if integralU_alpha != 0 else 0
+
+            results.append({
+                "Time": time_v,
+                "x": xx,
+                "U": U,
+                "H": H,
+                "ALPHA": ALPHA,
+                "y_crossing": y_crossing,
+                "U_alpha": U_alpha,
+                "H_alpha": H_alpha,
+                "ALPHA_alpha": ALPHA_alpha,
+                "y_crossing_alpha": y_crossing_alpha
+            })
+            # 存储速度零点的 (x, y)
+            velocity_zero_points.append((xx, y_crossing))
+
+
+        # Save results
+        df = pd.DataFrame(results)
+        df.to_csv(os.path.join(self.output_dir, f"integration_results_t{time_v}.csv"), index=False)
+        print(f"Results saved for t={time_v} (head_x={head_x:.2f}m)")
+
+        # Calculate perturbation fields
+        x_U_mapping = dict(zip(df['x'], df['U']))
+        x_U_mapping_alpha = dict(zip(df['x'], df['U_alpha']))
+        
+        fields = self.calculate_perturbation_fields(
+            X, Y, Ua_A, x_coords, x_U_mapping, x_U_mapping_alpha, gradbeta_x, omega_z, gradvorticity_x, beta
+        )
+        U_perturb, U_perturb_alpha, Umean_densitygradient, Uper_densitygradient, Umean_advection, Uper_advection, Uori_advection = fields
+
+        # Interpolate fields
+        xi = np.linspace(X.min(), X.max(), 1000)
+        yi = np.linspace(Y.min(), Y.max(), 100)
+        xi, yi = np.meshgrid(xi, yi)
+        
+        interpolated = self.interpolate_fields(
+            X, Y, xi, yi, {
+                'U_perturb': U_perturb,
+                'U_perturb_alpha': U_perturb_alpha,
+                'Umean_densitygradient': Umean_densitygradient,
+                'Uper_densitygradient': Uper_densitygradient,
+                'Umean_advection': Umean_advection,
+                'Uper_advection': Uper_advection,
+                'Uori_advection': Uori_advection,
+                'uxi': Ua_A[0],
+                'uyi': Ua_A[1],
+                'alpha_i': alpha_A,
+                'omega_z': omega_z,
+                'Q': self.calculate_q_criterion(gradU_x, gradU_y, gradV_x, gradV_y),
+                'Q_signed': self.signed_smooth(
+                    self.calculate_q_criterion(gradU_x, gradU_y, gradV_x, gradV_y), 
+                    omega_z
+                )
+            }
+        )
+
+        # Define positions for vertical lines
+        positions = {
+            '1/6H': head_x - (1/6)*self.Height,
+            '1/4H': head_x - 0.25*self.Height,
+            '1/2H': head_x - 0.5*self.Height,
+            'H': head_x - self.Height
+        }
+        y_text = 0.32
+                # Add this after other plot calls in process_time_step
+        self.plot_velocity_vectors(
+            xi, yi, interpolated['uxi'], interpolated['uyi'], interpolated['alpha_i'],
+            time_v, positions, y_text,
+            title=f'Velocity Field (t={time_v}s)',
+            filename=f'velocity_t{time_v}.png',
+            skip_x=6,          # Adjust density (higher = sparser)
+            skip_y=3,
+            scale = 3,
+            arrow_scale=1.0,
+            alpha_opacity=0.7,
+            alpha_cmap='gray_r',
+            velocity_zero_points=velocity_zero_points,  # 新增参数
+      # Or use speed for colormap (see below)
+        )
+ 
+
+
+
+
+        # # Generate plots
+        # self.plot_streamlines(
+        #     xi, yi, interpolated['U_perturb'], interpolated['uyi'], 
+        #     interpolated['U_perturb'], interpolated['alpha_i'], time_v, 
+        #     positions, y_text, f'Perturbation Velocity Streamlines (t={time_v})',
+        #     f'perturbation_streamlines_t{time_v}.png', 
+        #     "Velocity Perturbation $U_a\'$ [m/s]", -0.2, 0.05
+        # )
+
+        # self.plot_streamlines(
+        #     xi, yi, interpolated['U_perturb'], interpolated['uyi'], 
+        #     interpolated['U_perturb_alpha'], interpolated['alpha_i'], time_v, 
+        #     positions, y_text, f'Perturbation Velocity Streamlines (t={time_v})',
+        #     f'perturbation_streamlines_ALPHA_t{time_v}.png', 
+        #     "Velocity Perturbation $U_aALPHA\'$ [m/s]", -0.2, 0.05
+        # )
+
+        # self.plot_streamlines(
+        #     xi, yi, interpolated['uxi'], interpolated['uyi'], 
+        #     interpolated['uxi'], interpolated['alpha_i'], time_v, 
+        #     positions, y_text, f'Original Velocity Streamlines (t={time_v})',
+        #     f'origin_streamlines_t{time_v}.png', 
+        #     "Velocity $U_a$ [m/s]", 0.1, 0.2
+        # )
+
+        # self.plot_contour(
+        #     xi, yi, interpolated['Uper_densitygradient'], interpolated['alpha_i'], 
+        #     time_v, positions, y_text, f'DensityGradientPerturb (t={time_v})',
+        #     f'DensityGradientPerturb_t{time_v}.png', 'DensityGradientPerturb',
+        #     levels=np.linspace(-0.5, 0.5, 21)
+        # )
+
+        # self.plot_contour(
+        #     xi, yi, interpolated['Umean_densitygradient'], interpolated['alpha_i'], 
+        #     time_v, positions, y_text, f'DensityGradientMean (t={time_v})',
+        #     f'DensityGradientMean_t{time_v}.png', 'DensityGradientMean',
+        #     levels=np.linspace(-0.5, 0.5, 21)
+        # )
+
+        # self.plot_contour(
+        #     xi, yi, interpolated['omega_z'], interpolated['alpha_i'], 
+        #     time_v, positions, y_text, f'Vorticity (t={time_v})',
+        #     f'Vorticity_t{time_v}.png', '$\omega_z$ [1/s]',
+        #     levels=np.linspace(-10.5, 10.5, 81),
+        #     cmap='bwr'
+        # )
+
+        # self.plot_contour(
+        #     xi, yi, interpolated['Q_signed'], interpolated['alpha_i'], 
+        #     time_v, positions, y_text, 
+        #     f'Vortex identification via Q_criterion (t={time_v})',
+        #     f'Q_criterion_t{time_v}_signed_omega.png', 
+        #     'Q-Criterion',
+        #     levels=np.linspace(-5, 5, 41),
+        #     cmap='bwr'
+        # )
+
+        # self.plot_contour(
+        #     xi, yi, interpolated['Umean_advection'], interpolated['alpha_i'], 
+        #     time_v, positions, y_text, 
+        #     f'Umean_advection (t={time_v})',
+        #     f'Umean_advection_t{time_v}.png', 
+        #     'Umean_advection',
+        #     levels=np.linspace(-10, 10, 21),
+        #     cmap='bwr'
+        # )
+
+
+        # self.plot_contour(
+        #     xi, yi, interpolated['Uper_advection'], interpolated['alpha_i'], 
+        #     time_v, positions, y_text, 
+        #     f'Uper_advection (t={time_v})',
+        #     f'Uper_advection_t{time_v}.png', 
+        #     'Uper_advection',
+        #     levels=np.linspace(-10, 10, 21),
+        #     cmap='bwr'
+        # )
+
+
+        # self.plot_contour(
+        #     xi, yi, interpolated['Uori_advection'], interpolated['alpha_i'], 
+        #     time_v, positions, y_text, 
+        #     f'Uori_advection (t={time_v})',
+        #     f'Uori_advection_t{time_v}.png', 
+        #     'Uori_advection',
+        #     levels=np.linspace(-10, 10, 21),
+        #     cmap='bwr'
+        # )
+
+
+
+
+    def run_analysis(self):
+        """Main method to run the analysis for all time steps"""
+        os.makedirs(self.output_dir, exist_ok=True)
+        
+        for time_v in self.times:
+            print(f"Processing time step: {time_v}")
+            self.process_time_step(time_v)
+        
+        print(f"All results saved to: {self.output_dir}")
+
+
+if __name__ == "__main__":
+    analyzer = SalineCurrentAnalyzer()
+    analyzer.run_analysis()

@@ -6,8 +6,7 @@ from fractions import Fraction
 ### this code is used to extract the data at specific x location (head-0.3) at every time step #####
 
 # 常量定义
-A = 1/4  # 修改这里即可自动更新文件名（支持分数/浮点数）
-B = 1e-5
+A = 1/1  # 修改这里即可自动更新文件名（支持分数/浮点数）
 y_min = 0
 alpha_threshold = 1e-5
 
@@ -55,7 +54,8 @@ def get_output_files():
         'ALPHA_alpha': f'x{a_id}xALPHA_alpha.csv',
         'H_depth_alpha': f'x{a_id}xH_depth_alpha.csv',
         'advection': f'x{a_id}xAdvection.csv',
-        'vorticity': f'x{a_id}xVorticity.csv'
+        'vorticity': f'x{a_id}xVorticity.csv',
+        'ycrossing': f'x{a_id}xYcrossing.csv',
     }
 
 
@@ -97,9 +97,16 @@ def calculate_derived_values(xvalue,yvalue, alpha, kinetic_energy, gamma, grad_d
 
             # 寻找速度正负交界点
     sign_changes = np.where(np.diff(np.sign(uavalue)))[0]
-    max_ya_crossing_index = sign_changes[np.argmax(yvalue[sign_changes])] + 1 if len(sign_changes) > 0 else len(yvalue) - 1
+        # 找出第一个（最低处）满足 "负→正" 的变化点
+    for idx in sign_changes:
+        if yvalue[idx] > 0.001 and uavalue[idx] > 0 and uavalue[idx + 1] < 0: #and alpha[idx] > 1e-5:
+            max_ya_crossing_index = idx + 1  # （可选 +1，取决于是否需要变化后的位置）
+            break
+    else:
+            max_ya_crossing_index = len(yvalue) - 1  # 没找到则默认取最高处
     y_crossing = yvalue[max_ya_crossing_index]
     u_crossing = uavalue[max_ya_crossing_index]
+    print(f"Found y_crossing at {y_crossing} for xx={xvalue[0]}at max_ya_crossing_index={max_ya_crossing_index}")
         
     # Vectorized integration
     ua_alpha = uavalue * alpha
@@ -110,7 +117,7 @@ def calculate_derived_values(xvalue,yvalue, alpha, kinetic_energy, gamma, grad_d
         
     # Calculate derived quantities
     U = U2h / Uh if Uh != 0 else 0
-    H = Ucih**2 / Uci2h if Uci2h != 0 else 0
+    # H = Ucih**2 / Uci2h if Uci2h != 0 else 0
     ALPHA = Ucih / Uh if Uh != 0 else 0
     H_depth = Uh**2 / U2h if U2h != 0 else 0
     
@@ -179,15 +186,17 @@ def calculate_derived_values(xvalue,yvalue, alpha, kinetic_energy, gamma, grad_d
         'dragpart': dragpart.tolist(),
         'buoyancy': buoyancy.tolist(),
         'dissipation': dissipation.tolist(),
-        'H': [H],
+        # 'H': [H],
         'U': [U],
         'ALPHA': [ALPHA],
         'H_depth': [H_depth],
-        'H_alpha': H_alpha,
+        'H_alpha': [H_alpha],
         'U_alpha': [U_alpha],
         'ALPHA_alpha': [ALPHA_alpha],
         'H_depth_alpha': [H_depth_alpha],
-        'advection': advection.tolist()
+        'advection': advection.tolist(),
+        'ycrossing': [y_crossing],
+
     
     }
 
@@ -222,12 +231,12 @@ def process_time_step(sol, time_v, X, Y):
     unique_x = np.unique(X)
     closest_x = unique_x[np.argmin(np.abs(unique_x - target_x))]
     
-    # 提取数据
-    mask = np.isclose(X, closest_x, atol=1e-6, rtol=1e-6)
-    if not np.any(mask):
-        print(f"Warning: No points found at x={closest_x:.3f}m for t={time_v}")
-        return None
-
+    # # 提取数据
+    # mask = np.isclose(X, closest_x, atol=1e-6, rtol=1e-6)
+    # if not np.any(mask):
+    #     print(f"Warning: No points found at x={closest_x:.3f}m for t={time_v}")
+    #     return None
+    mask = (X == closest_x) & (Y >= 0) & (alpha > alpha_threshold) 
     yvalue = Y[mask]
     xvalue = X[mask]
     uavalue = Ua[0][mask]
@@ -317,7 +326,7 @@ def main():
     #sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Large_particle53/case530826_4"
 
     X, Y, Z = fluidfoam.readmesh(sol)
-    times = np.arange(1, 15, 1)  # 对应原来的1-79,步长2
+    times = np.arange(5, 15, 1)  # 对应原来的1-79,步长2
     results = []
     BASE_PATH = '/home/amber/postpro/selecting_variant/'
     FILE_PREFIX = 'case230427_4midd'  # 修改这里即可自动更新文件名

@@ -11,13 +11,16 @@ class TurbidityCurrentAnalyzer:
     def __init__(self):
         # Configuration parameters
         self.sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Middle_particle23/case230427_4"
+        # self.sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Fine_particle9/case090912_1"
         self.output_dir = "/home/amber/postpro/u_umean_tc"
         self.alpha_threshold = 1e-5
         self.y_min = 0
-        self.times = [10]
-        self.FIG_SIZE = (40, 6)
-        self.X_LIM = (0.0, 1.5)
+        self.times = [7,10,12]
+        self.FIG_SIZE = (40, 8)
+        self.X_LIM = (0.0, 1.6)
+        self.Y_LIM = (0.0, 0.3)
         self.Height = 0.3
+        self.colorset = 'fuchsia'
         
         # Visualization parameters
         self.ALPHA_CONTOUR_PARAMS = {
@@ -62,9 +65,23 @@ class TurbidityCurrentAnalyzer:
 
     def integrate_quantities(self, ya, ua_x, alpha_vals):
         """Perform vertical integration of quantities"""
-        # Find front height
         sign_changes = np.where(np.diff(np.sign(ua_x)))[0]
-        max_ya_crossing_index = sign_changes[np.argmax(ya[sign_changes])] + 1 if len(sign_changes) > 0 else len(ya) - 1
+        # 找出第一个（最低处）满足变化点
+        for idx in sign_changes:
+            if ya[idx] > 0.001 and ua_x[idx] > 0 and ua_x[idx + 1] < 0:
+                max_ya_crossing_index = idx + 1  # （可选 +1，取决于是否需要变化后的位置）
+                break
+        else:
+            max_ya_crossing_index = len(ya) - 1  # 没找到则默认取最高处
+        # max_ya_crossing_index = sign_changes[np.argmax(ya[sign_changes])] + 1 if len(sign_changes) > 0 else len(ya) - 1
+        # Find front height
+        # velocity_sign_changes = np.diff(np.sign(ua_x)) != 0  # 速度符号变化的点 (n-1)
+        # valid_height_mask = ya[:-1] > 1e-4                  # 排除 y <= 0.005 的点 (n-1)
+        
+        # # 逻辑与合并条件（注意 ya[:-1] 因为 diff 结果长度是 n-1）
+        # sign_changes = np.where(np.logical_and(velocity_sign_changes, valid_height_mask))[0]
+        # 获取最高位置的交点（若无交点则用最后一个点）
+        #max_ya_crossing_index = sign_changes[np.argmax(ya[sign_changes])] + 1 if len(sign_changes) > 0 else len(ya) - 1
         
         # Vectorized integration
         ua_alpha = ua_x * alpha_vals
@@ -75,11 +92,9 @@ class TurbidityCurrentAnalyzer:
         
         # Calculate derived quantities
         U = integralU2 / integralU if integralU != 0 else 0
-        H = integral**2 / integral2 if integral2 != 0 else 0
-        ALPHA = integral / integralU if integralU != 0 else 0
         H_depth = integralU**2 / integralU2 if integralU2 != 0 else 0
-        
-        return U, H, ALPHA, H_depth, ya[max_ya_crossing_index]
+
+        return U, H_depth, ya[max_ya_crossing_index]
 
     def calculate_perturbation_fields(self, X, Y, Ua_A, x_coords, x_U_mapping, x_U_mapping_alpha, gradbeta_x, omega_z, gradvorticity_x, beta):
         """Calculate perturbation velocity and advection fields"""
@@ -120,28 +135,75 @@ class TurbidityCurrentAnalyzer:
         
         if vmin is not None and vmax is not None:
             color_field = np.clip(color_field, vmin, vmax)
+        # 1. Plot alpha concentration cloud map (background)
+        cf = plt.contourf(
+            xi, yi, alpha_i,
+            levels=np.linspace(0, 0.015, 128),                   # 颜色分级数
+            cmap='Purples',              # 云图颜色映射
+            alpha=0.75,          # 透明度
+            antialiased=True,             # 抗锯齿
+            zorder=1
+            
+        )
         
+     
+         # --- 关键修改：强制颜色映射范围为 [vmin, 0.2]，即使 vmax < 0.2 ---
+        norm_stream= plt.Normalize(vmin=vmin, vmax=vmax)  # 固定颜色条上限为 0.2
+        # speed = np.sqrt(ux**2 + uy**2)
         strm = plt.streamplot(
             xi, yi, ux, uy,
             color=color_field,
-            cmap=plt.cm.rainbow,
+            cmap='turbo',
             linewidth=1,
-            density=8,
-            arrowsize=3,
+            density=5,
+            arrowsize=2.5,
             arrowstyle='->',
-            zorder=1
+            zorder=2,
+            norm=norm_stream
         )
+
+        # cbar = plt.colorbar(strm.lines, label=color_label, orientation='horizontal', fraction=0.045,aspect = 30, pad=0.2)
+                # --- 3. 双颜色条（水平对齐）---
+        # (A) Contourf colorbar (左侧)
+        cbar_alpha = plt.colorbar(
+            cf,
+            label=r'$\alpha_s$',
+            orientation='horizontal',
+            pad=0.15,   # 调整间距（与stream bar一致）
+            aspect=30,
+            shrink=0.45,  # 缩小宽度以适应左侧
+        )
+        # 手动调整 contounf 颜色条位置 [左, 下, 宽, 高]
+        cbar_alpha.ax.set_position([0.20, 0.35, 0.30, 0.03])  # 左对齐，高度与stream bar一致
+        cbar_alpha.set_ticks([0.000, 0.0075, 0.015])
+
+        # (B) Streamplot colorbar (右侧)
+        cbar_speed = plt.colorbar(
+            strm.lines,
+            label='Velocity [m/s]',
+            orientation='horizontal',
+            pad=0.15,    # 保持原位置
+            aspect=30,
+            shrink=0.45,  # 缩小宽度以适应右侧
+        )
+        # 手动调整 stream 颜色条位置 [左, 下, 宽, 高]
+        cbar_speed.ax.set_position([0.50, 0.35, 0.30, 0.03])  # 右对齐，高度与alpha bar一致
+        cbar_speed.set_ticks([vmin, (vmin+vmax)/2, vmax])
+        #cbar.ax.tick_params(labelsize=10)
+
+        #cbar.set_label( label=r'$\alpha_s$',fontsize=12)
         
         plt.contour(xi, yi, alpha_i, **self.ALPHA_CONTOUR_PARAMS)
 
         for label, x_pos in positions.items():
-            plt.axvline(x=x_pos, color='b', linestyle='dashdot', linewidth=1, zorder=3)
-            plt.text(x_pos + 0.01, y_text, f'{label}', fontsize=15, zorder=3, color='b')
+            plt.axvline(x=x_pos, color=self.colorset, linestyle='dashdot', linewidth=1, zorder=3)
+            plt.text(x_pos + 0.005, y_text, f'{label}', fontsize=20, zorder=3, color=self.colorset)
         
-        cbar = plt.colorbar(strm.lines, label=color_label)
+
         plt.xlabel('x [m]')
         plt.ylabel('y [m]')
         plt.xlim(*self.X_LIM)
+        plt.ylim(*self.Y_LIM)
         plt.title(title)
         plt.savefig(os.path.join(self.output_dir, filename), dpi=300, bbox_inches='tight')
         plt.close()
@@ -164,10 +226,10 @@ class TurbidityCurrentAnalyzer:
         plt.contour(xi, yi, alpha_i, **self.ALPHA_CONTOUR_PARAMS)
         
         for label, x_pos in positions.items():
-            plt.axvline(x=x_pos, color='b', linestyle='dashdot', linewidth=1, zorder=3)
-            plt.text(x_pos + 0.01, y_text, f'{label}', fontsize=15, zorder=3, color='b')
+            plt.axvline(x=x_pos, color='lightcoral', linestyle='dashdot', linewidth=1.5, zorder=3)
+            plt.text(x_pos + 0.005, y_text, f'{label}', fontsize=15, zorder=3, color='lightcoral')
         
-        cbar = plt.colorbar(contour, label=color_label)
+        cbar = plt.colorbar(contour, label=color_label, orientation='horizontal')
         plt.xlabel('x [m]')
         plt.ylabel('y [m]')
         plt.xlim(*self.X_LIM)
@@ -181,7 +243,7 @@ class TurbidityCurrentAnalyzer:
     def plot_velocity_vectors(
             self, xi, yi, ux, uy, alpha_i, time_v, positions, y_text,
         title, filename, skip_x=3, skip_y=3, vector_color='red', scale=1.0,
-            arrow_scale=1.0, alpha_opacity=0.6, alpha_cmap='gray_r',velocity_zero_points=None
+            arrow_scale=1.0, alpha_opacity=0.6, alpha_cmap='gray_r',velocity_zero_points=None,h_points = None, normalize_x=False, head_x=None, H0=0.3, vmin=0, vmax=0.2
         ):
         """
         Plot velocity vectors with proper arrowheads and speed-proportional lengths.
@@ -195,7 +257,10 @@ class TurbidityCurrentAnalyzer:
                 Color of arrows (can be a colormap).
         """
         plt.figure(figsize=self.FIG_SIZE)
-        
+            
+
+        x_label = 'x [m]'
+        y_label = 'y [m]'
 
 
         # Mask regions where alpha < threshold (no arrows)
@@ -216,16 +281,17 @@ class TurbidityCurrentAnalyzer:
         # 1. Plot alpha concentration cloud map (background)
         cf = plt.contourf(
         xi, yi, alpha_i,
-        levels=np.linspace(0, 0.012, 128),                   # 颜色分级数
+        levels = np.linspace(0, 0.012, 128),                   # 颜色分级数
         cmap=alpha_cmap,              # 云图颜色映射
         alpha=alpha_opacity,          # 透明度
         antialiased=True              # 抗锯齿
         )
         cbar = plt.colorbar(cf, label=r'$\alpha_s$',orientation='horizontal')
         cbar.ax.tick_params(labelsize=10)
-        #cbar.set_label( label='$\alpha_s$',fontsize=10)
-        cbar.ax.set_position([0.75, 0.6, 0.2, 0.02])  # [left, bottom, width, height]
-
+        cbar.set_label( label=r'$\alpha_s$',fontsize=12)
+        cbar.set_ticks([0.000, 0.006, 0.012])
+        cbar.ax.set_position([0.75, 0.7, 0.2, 0.02])  # [left, bottom, width, height]
+        norm = plt.Normalize(vmin=vmin, vmax=vmax)
         # 绘制长度随 speed 变化的矢量
         q = plt.quiver(
             xi[::skip_y, ::skip_x], yi[::skip_y, ::skip_x],
@@ -239,22 +305,24 @@ class TurbidityCurrentAnalyzer:
             headwidth=5 * arrow_scale,  # 头部宽度
             headlength=7 * arrow_scale, # 头部长度
             headaxislength=4.5 * arrow_scale,
+            norm=norm,
             #color=vector_color,         # 统一颜色（或用 cmap 映射 speed）
-            #edgecolor='k',              # 黑色描边增强对比
             linewidth=0.8,
             cmap='cool' #if vector_color is None else None  # 可选颜色映射
         )
         #plt.colorbar(q, label='Velocity Magnitude')
          # 添加速度颜色图例（quiver专用colorbar）
-        cbar_speed = plt.colorbar(q, label='Velocity Magnitude [m/s]',orientation='horizontal')
+        cbar_speed = plt.colorbar(q, label='Velocity Magnitude [m/s]',orientation='horizontal', norm=norm)
         cbar_speed.ax.tick_params(labelsize=10)
-        cbar_speed.set_label('Velocity Magnitude [m/s]', fontsize=10)
+        cbar_speed.set_label('Velocity Magnitude [m/s]', fontsize=12)
+        cbar_speed.set_ticks([0, vmax/2, vmax])
         cbar_speed.ax.set_position([0.75, 0.8, 0.2, 0.02])  # [left, bottom, width, height]
+        
 
             # === 3. 添加箭头长度的参考图例 ===
         # 手动在角落添加参考箭头（需计算实际物理长度）
-        ref_speed = max_speed  # 示例参考速度（可自定义）
-        ref_x, ref_y = 0.9, 0.6    # 图例位置（相对坐标）
+        ref_speed = 0.1  # 示例参考速度（可自定义）
+        ref_x, ref_y = 0.9, 0.95    # 图例位置（相对坐标）
         ref_arrow = plt.quiver(
             ref_x, ref_y,
             ref_speed / max_speed * arrow_scale, 0,  # 水平箭头
@@ -268,19 +336,8 @@ class TurbidityCurrentAnalyzer:
             f'{ref_speed:.2f} m/s',
             transform=plt.gca().transAxes,
             va='center', ha='left',
-            fontsize=10,
+            fontsize=12,
         )
-
-        # # Set uniform color if not using colormap
-        # if isinstance(cmap, str):
-        #     q.set_color(cmap)
-
-        # # Optional: Add colorbar if coloring by speed
-        # if not isinstance(cmap, str):
-        #     plt.colorbar(q, label='Velocity Magnitude')
-
-
-
 
 
 
@@ -288,10 +345,10 @@ class TurbidityCurrentAnalyzer:
         c=plt.contour(xi, yi, alpha_i, **self.ALPHA_CONTOUR_PARAMS)
         
 
-        # 4. Add reference lines/labels
-        for label, x_pos in positions.items():
-            plt.axvline(x=x_pos, color='b', linestyle=':', linewidth=0.8)
-            plt.text(x_pos + 0.01, y_text, label, fontsize=12, color='b')
+        # # 4. Add reference lines/labels
+        # for label, x_pos in positions.items():
+        #     plt.axvline(x=x_pos, color='b', linestyle=':', linewidth=0.8)
+        #     plt.text(x_pos + 0.01, y_text, label, fontsize=12, color='b')
 
 
             # === 新增：绘制速度零点连线 ===
@@ -314,10 +371,344 @@ class TurbidityCurrentAnalyzer:
             )    
 
 
+        #     # === 新增：绘制积分H连线 ===
+        # if h_points and len(h_points) > 0:
+        #     h_x, h_y = zip(*h_points)
+            
+        #     # 按 x 坐标排序以确保连线顺序正确
+        #     sorted_indices = np.argsort(h_x)
+        #     h_x_sorted = np.array(h_x)[sorted_indices]
+        #     h_y_sorted = np.array(h_y)[sorted_indices]
+            
+        #     # 绘制虚线
+        #     plt.plot(
+        #         h_x_sorted, h_y_sorted,
+        #         color='red',               # 蓝色虚线（可自定义）
+        #         linestyle='--',
+        #         linewidth=2,
+        #         label='Velocity Zero Crossing',
+        #         zorder=4                    # 确保在箭头上方
+        #     ) 
 
-        plt.xlabel('x [m]')
-        plt.ylabel('y [m]')
-        plt.xlim(*self.X_LIM)
+
+
+        plt.xlabel(x_label)
+        plt.ylabel(y_label)
+        plt.xlim(*self.X_LIM if not normalize_x else (0,self.X_LIM[1]-head_x)/H0)
+        plt.ylim(0,0.3)
+        plt.title(title)
+        plt.savefig(os.path.join(self.output_dir, filename), dpi=300, bbox_inches='tight')
+        plt.close()
+
+    def plot_velocity_vectors2(
+            self, xi, yi, ux, uy, alpha_i, time_v, positions, y_text,
+        title, filename, skip_x=3, skip_y=3, vector_color='red', scale=1.0,
+            arrow_scale=1.0, alpha_opacity=0.6, alpha_cmap='gray_r',velocity_zero_points=None,h_points = None, normalize_x=False, head_x=None, H0=0.3, vmin=0, vmax=0.2
+        ):
+        """
+        Plot velocity vectors with proper arrowheads and speed-proportional lengths.
+        
+        Parameters:
+            scale : float
+                Larger values make arrows shorter (e.g., 50 = medium, 100 = short).
+            skip_x, skip_y : int
+                Sampling step (higher = fewer arrows).
+            color : str or array-like
+                Color of arrows (can be a colormap).
+        """
+        plt.figure(figsize=self.FIG_SIZE)
+            
+
+        x_label = 'x [m]'
+        y_label = 'y [m]'
+
+
+
+
+        # Compute speed (magnitude of velocity)
+        # 计算速度大小
+        speed = np.sqrt(ux**2 + uy**2)
+        
+        # 归一化速度分量（保持方向，长度 = speed）
+        max_speed = np.nanmax(speed)  # 避免除以零
+        normalized_ux = (ux / max_speed) * arrow_scale
+        normalized_uy = (uy / max_speed) * arrow_scale
+
+        # 1. Plot alpha concentration cloud map (background)
+        cf = plt.contourf(
+        xi, yi, alpha_i,
+        levels = np.linspace(0, 0.012, 128),                   # 颜色分级数
+        cmap=alpha_cmap,              # 云图颜色映射
+        alpha=alpha_opacity,          # 透明度
+        antialiased=True              # 抗锯齿
+        )
+        cbar = plt.colorbar(cf, label=r'$\alpha_s$',orientation='horizontal')
+        cbar.ax.tick_params(labelsize=10)
+        cbar.set_label( label=r'$\alpha_s$',fontsize=12)
+        cbar.set_ticks([0.000, 0.006, 0.012])
+        cbar.ax.set_position([0.75, 0.7, 0.2, 0.02])  # [left, bottom, width, height]
+        norm = plt.Normalize(vmin=vmin, vmax=vmax)
+        # 绘制长度随 speed 变化的矢量
+        q = plt.quiver(
+            xi[::skip_y, ::skip_x], yi[::skip_y, ::skip_x],
+            normalized_ux[::skip_y, ::skip_x],  # 归一化后的分量
+            normalized_uy[::skip_y, ::skip_x],
+            speed[::skip_y, ::skip_x],  # 仍用于颜色映射（可选）
+            scale=scale,                # 设为 1.0 或更小的基础缩放
+            scale_units='inches',       # 固定物理长度单位
+            angles='xy',                # 确保方向正确
+            width=0.0005 * arrow_scale,  # 箭头宽度
+            headwidth=5 * arrow_scale,  # 头部宽度
+            headlength=7 * arrow_scale, # 头部长度
+            headaxislength=4.5 * arrow_scale,
+            norm=norm,
+            #color=vector_color,         # 统一颜色（或用 cmap 映射 speed）
+            linewidth=0.8,
+            cmap='cool' #if vector_color is None else None  # 可选颜色映射
+        )
+        #plt.colorbar(q, label='Velocity Magnitude')
+         # 添加速度颜色图例（quiver专用colorbar）
+        cbar_speed = plt.colorbar(q, label='Velocity Magnitude [m/s]',orientation='horizontal', norm=norm)
+        cbar_speed.ax.tick_params(labelsize=10)
+        cbar_speed.set_label('Velocity Magnitude [m/s]', fontsize=12)
+        cbar_speed.set_ticks([0, vmax/2, vmax])
+        cbar_speed.ax.set_position([0.75, 0.8, 0.2, 0.02])  # [left, bottom, width, height]
+        
+
+            # === 3. 添加箭头长度的参考图例 ===
+        # 手动在角落添加参考箭头（需计算实际物理长度）
+        ref_speed = 0.1  # 示例参考速度（可自定义）
+        ref_x, ref_y = 0.9, 0.95    # 图例位置（相对坐标）
+        ref_arrow = plt.quiver(
+            ref_x, ref_y,
+            ref_speed / max_speed * arrow_scale, 0,  # 水平箭头
+            color='k', scale=3, scale_units='inches',
+            width=0.0005 * arrow_scale,  # 加粗显示
+            headwidth=5 * arrow_scale,
+            transform=plt.gca().transAxes  # 使用相对坐标
+        )
+        plt.text(
+            ref_x + 0.02, ref_y,
+            f'{ref_speed:.2f} m/s',
+            transform=plt.gca().transAxes,
+            va='center', ha='left',
+            fontsize=12,
+        )
+
+
+
+        # 3. Overlay alpha contour
+        c=plt.contour(xi, yi, alpha_i, **self.ALPHA_CONTOUR_PARAMS)
+        
+
+        # 4. Add reference lines/labels
+        for label, x_pos in positions.items():
+            plt.axvline(x=x_pos, color=self.colorset, linestyle='dashdot', linewidth=1, zorder=3)
+            plt.text(x_pos + 0.005, y_text, f'{label}', fontsize=20, zorder=3, color=self.colorset)
+
+
+        #     # === 新增：绘制速度零点连线 ===
+        # if velocity_zero_points and len(velocity_zero_points) > 0:
+        #     zero_x, zero_y = zip(*velocity_zero_points)
+            
+        #     # 按 x 坐标排序以确保连线顺序正确
+        #     sorted_indices = np.argsort(zero_x)
+        #     zero_x_sorted = np.array(zero_x)[sorted_indices]
+        #     zero_y_sorted = np.array(zero_y)[sorted_indices]
+            
+        #     # 绘制虚线
+        #     plt.plot(
+        #         zero_x_sorted, zero_y_sorted,
+        #         color='red',               # 蓝色虚线（可自定义）
+        #         linestyle='--',
+        #         linewidth=2,
+        #         label='Velocity Zero Crossing',
+        #         zorder=4                    # 确保在箭头上方
+        #     )    
+
+
+            # === 新增：绘制积分H连线 ===
+        if h_points and len(h_points) > 0:
+            h_x, h_y = zip(*h_points)
+            
+            # 按 x 坐标排序以确保连线顺序正确
+            sorted_indices = np.argsort(h_x)
+            h_x_sorted = np.array(h_x)[sorted_indices]
+            h_y_sorted = np.array(h_y)[sorted_indices]
+            
+            # 绘制虚线
+            plt.plot(
+                h_x_sorted, h_y_sorted,
+                color='red',               # 蓝色虚线（可自定义）
+                linestyle='--',
+                linewidth=2,
+                label='Velocity Zero Crossing',
+                zorder=4                    # 确保在箭头上方
+            ) 
+
+
+
+        plt.xlabel(x_label)
+        plt.ylabel(y_label)
+        plt.xlim(*self.X_LIM if not normalize_x else (0,self.X_LIM[1]-head_x)/H0)
+        plt.ylim(0,0.3)
+        plt.title(title)
+        plt.savefig(os.path.join(self.output_dir, filename), dpi=300, bbox_inches='tight')
+        plt.close()
+
+    def plot_velocity_vectors3(
+            self, xi, yi, ux, uy, alpha_i, time_v, positions, y_text,
+        title, filename, skip_x=3, skip_y=3, vector_color='red', scale=1.0,
+            arrow_scale=1.0, alpha_opacity=0.6, alpha_cmap='gray_r',velocity_zero_points=None,h_points = None, normalize_x=False, head_x=None, H0=0.3, vmin=0, vmax=0.2,Hi=None
+        ):
+        """
+        Plot velocity vectors with proper arrowheads and speed-proportional lengths.
+        
+        Parameters:
+            scale : float
+                Larger values make arrows shorter (e.g., 50 = medium, 100 = short).
+            skip_x, skip_y : int
+                Sampling step (higher = fewer arrows).
+            color : str or array-like
+                Color of arrows (can be a colormap).
+        """
+        plt.figure(figsize=self.FIG_SIZE)
+            
+
+        x_label = 'x [m]'
+        y_label = 'y [m]'
+        # Compute speed (magnitude of velocity)
+        # 计算速度大小
+        # 保持原始网格结构计算速度
+        speed = np.sqrt(ux**2 + uy**2)  # 依然是二维数组
+
+# Create mask for valid regions (alpha > 1e-5 and 0.005 < y < Hi)
+        alpha_mask =  (yi > 0.005) 
+        # 分割高速度区(y>Hi)和关注区(y≤Hi)
+        mask_high_speed = (yi > Hi)   # y>Hi的区域
+        mask_focus_area = (yi <= Hi)  & (yi > 0.05)# 你关注的y≤Hi区域
+
+        # 分别计算两区的最大速度
+        max_speed_high = np.nanmax(np.where(mask_high_speed, speed, np.nan))
+        max_speed_focus = np.nanmax(np.where(mask_focus_area, speed, np.nan))
+
+        # 如果关注区速度太小，限制最小缩放比例
+        if max_speed_focus < 0.1 * max_speed_high:
+            max_speed_focus = max_speed_high * 0.1
+
+
+
+        # 用掩码区域计算最大速度
+        # 高速度区：缩小箭头
+        ux_normalized = np.where(
+            mask_high_speed, 
+            ux * (arrow_scale * 0.05) / max_speed_high,  # 缩小30%
+            ux * arrow_scale*10 / max_speed_focus  # 关注区正常缩放
+        )
+
+        uy_normalized = np.where(
+            mask_high_speed,
+            uy * (arrow_scale * 0.05) / max_speed_high,
+            uy * arrow_scale *10/ max_speed_focus
+        )
+
+
+        # # 归一化+掩码一步完成
+        # normalized_ux = np.where(alpha_mask, (ux/max_speed)*arrow_scale, np.nan)
+        # normalized_uy = np.where(alpha_mask, (uy/max_speed)*arrow_scale, np.nan)
+
+
+
+        
+        
+        
+        # # Apply mask to velocity components
+        # masked_ux = np.where(alpha_mask, normalized_ux, np.nan)
+        # masked_uy = np.where(alpha_mask, normalized_uy, np.nan)
+        # masked_speed = np.where(alpha_mask, speed, np.nan)
+
+        # Plot alpha concentration background
+        cf = plt.contourf(
+            xi, yi, alpha_i,
+            levels=np.linspace(0, 0.012, 128),
+            cmap=alpha_cmap,
+            alpha=alpha_opacity,
+            antialiased=True
+        )
+        
+        # Add alpha colorbar
+        cbar = plt.colorbar(cf, label=r'$\alpha_s$', orientation='horizontal')
+        cbar.ax.tick_params(labelsize=10)
+        cbar.set_label(label=r'$\alpha_s$', fontsize=12)
+        cbar.set_ticks([0.000, 0.006, 0.012])
+        cbar.ax.set_position([0.75, 0.7, 0.2, 0.02])
+        
+        # Plot vectors with proper scaling
+        norm = plt.Normalize(vmin=vmin, vmax=vmax)
+        q = plt.quiver(
+            xi[::skip_y, ::skip_x], yi[::skip_y, ::skip_x],
+            ux_normalized[::skip_y, ::skip_x],
+            uy_normalized[::skip_y, ::skip_x],
+            speed[::skip_y, ::skip_x],
+            scale=10/scale,  # Adjusted scaling (higher scale = shorter arrows)
+            scale_units='inches',
+            angles='uv',
+            width=0.0002 * arrow_scale,
+            headwidth=1 * arrow_scale,
+            headlength=1 * arrow_scale,
+            headaxislength=1 * arrow_scale,
+            norm=norm,
+            linewidth=1.0,
+            cmap='cool',
+            minlength=0.001  # Minimum length for arrows to appear
+        )
+        #plt.colorbar(q, label='Velocity Magnitude')
+         # 添加速度颜色图例（quiver专用colorbar）
+        cbar_speed = plt.colorbar(q, label='Velocity Magnitude [m/s]',orientation='horizontal', norm=norm)
+        cbar_speed.ax.tick_params(labelsize=10)
+        cbar_speed.set_label('Velocity Magnitude [m/s]', fontsize=12)
+        cbar_speed.set_ticks([0, vmax/2, vmax])
+        cbar_speed.ax.set_position([0.75, 0.8, 0.2, 0.02])  # [left, bottom, width, height]
+        
+
+
+
+        # 3. Overlay alpha contour
+        c=plt.contour(xi, yi, alpha_i, **self.ALPHA_CONTOUR_PARAMS)
+        
+
+        # 4. Add reference lines/labels
+        for label, x_pos in positions.items():
+            plt.axvline(x=x_pos, color=self.colorset, linestyle='dashdot', linewidth=1, zorder=3)
+            plt.text(x_pos + 0.005, y_text, f'{label}', fontsize=20, zorder=3, color=self.colorset)
+
+
+
+            # === 新增：绘制积分H连线 ===
+        if h_points and len(h_points) > 0:
+            h_x, h_y = zip(*h_points)
+            
+            # 按 x 坐标排序以确保连线顺序正确
+            sorted_indices = np.argsort(h_x)
+            h_x_sorted = np.array(h_x)[sorted_indices]
+            h_y_sorted = np.array(h_y)[sorted_indices]
+            
+            # 绘制虚线
+            plt.plot(
+                h_x_sorted, h_y_sorted,
+                color='red',               # 蓝色虚线（可自定义）
+                linestyle='--',
+                linewidth=2,
+                label='Velocity Zero Crossing',
+                zorder=4                    # 确保在箭头上方
+            ) 
+
+
+
+        plt.xlabel(x_label)
+        plt.ylabel(y_label)
+        plt.xlim(*self.X_LIM if not normalize_x else (0,self.X_LIM[1]-head_x)/H0)
+        plt.ylim(0,0.3)
         plt.title(title)
         plt.savefig(os.path.join(self.output_dir, filename), dpi=300, bbox_inches='tight')
         plt.close()
@@ -328,10 +719,10 @@ class TurbidityCurrentAnalyzer:
     def process_time_step(self, time_v):
         """Process data for a single time step"""
         # Read field data
-        Ua_A = fluidfoam.readvector(self.sol, str(time_v), "U.b")
+        Ua_A = fluidfoam.readvector(self.sol, str(time_v), "U.a")
         alpha_A = fluidfoam.readscalar(self.sol, str(time_v), "alpha.a")
         beta = fluidfoam.readscalar(self.sol, str(time_v), "alpha.b")
-        gradU = fluidfoam.readtensor(self.sol, str(time_v), "grad(U.b)")
+        gradU = fluidfoam.readtensor(self.sol, str(time_v), "grad(U.a)")
         vorticity = fluidfoam.readvector(self.sol, str(time_v), "vorticity")
         gradbeta = fluidfoam.readvector(self.sol, str(time_v), "grad(alpha.b)")
         gradvorticity = fluidfoam.readtensor(self.sol, str(time_v), "grad(vorticity)")
@@ -347,6 +738,7 @@ class TurbidityCurrentAnalyzer:
         gradvorticity_y = gradvorticity[5]
 
         velocity_zero_points = []
+        h_points = []
 
         # Locate head position
         X, Y, Z = fluidfoam.readmesh(self.sol)
@@ -364,7 +756,7 @@ class TurbidityCurrentAnalyzer:
         x_coords = np.unique(X[(X <= head_x) & (X >= 0)])
         
         for xx in x_coords:
-            mask = (X == xx) & (alpha_A > 1e-5) & (Y > 0)
+            mask = (X == xx)  & (Y >= 0) & (alpha_A > 1e-5)
             if not np.any(mask):
                 continue
             
@@ -373,16 +765,16 @@ class TurbidityCurrentAnalyzer:
             alpha = np.maximum(alpha_A[mask], 0)
             
             # Sort by y
-            sort_idx = np.argsort(ya)
-            ya = ya[sort_idx]
-            ua_x = ua[sort_idx]
-            alpha_vals = alpha[sort_idx]
+            # sort_idx = np.argsort(ya)
+            ya = ya
+            ua_x = ua
+            alpha_vals = alpha
 
             # Calculate quantities
-            U, H, ALPHA, H_depth, y_crossing = self.integrate_quantities(ya, ua_x, alpha_vals)
+            U, H_depth, y_crossing = self.integrate_quantities(ya, ua_x, alpha)
             
             # Additional calculations for alpha crossing
-            y_threshold = 0.005
+            y_threshold = 0
             valid_mask = ya > y_threshold
             if np.any(valid_mask):
                 below_threshold = (alpha_vals[valid_mask] < 1e-5)
@@ -416,8 +808,7 @@ class TurbidityCurrentAnalyzer:
                 "Time": time_v,
                 "x": xx,
                 "U": U,
-                "H": H,
-                "ALPHA": ALPHA,
+                "H": H_depth,
                 "y_crossing": y_crossing,
                 "U_alpha": U_alpha,
                 "H_alpha": H_alpha,
@@ -426,6 +817,7 @@ class TurbidityCurrentAnalyzer:
             })
             # 存储速度零点的 (x, y)
             velocity_zero_points.append((xx, y_crossing))
+            h_points.append((xx, H_depth))
 
 
         # Save results
@@ -443,7 +835,7 @@ class TurbidityCurrentAnalyzer:
         U_perturb, U_perturb_alpha, Umean_densitygradient, Uper_densitygradient, Umean_advection, Uper_advection, Uori_advection = fields
 
         # Interpolate fields
-        xi = np.linspace(X.min(), X.max(), 1000)
+        xi = np.linspace(X.min(), X.max(), 750)#1000
         yi = np.linspace(Y.min(), Y.max(), 100)
         xi, yi = np.meshgrid(xi, yi)
         
@@ -464,46 +856,93 @@ class TurbidityCurrentAnalyzer:
                 'Q_signed': self.signed_smooth(
                     self.calculate_q_criterion(gradU_x, gradU_y, gradV_x, gradV_y), 
                     omega_z
-                )
+                ),
+                
             }
         )
 
         # Define positions for vertical lines
         positions = {
-            '1/6H': head_x - (1/6)*self.Height,
-            '1/4H': head_x - 0.25*self.Height,
-            '1/2H': head_x - 0.5*self.Height,
+            '0.1H': head_x - 0.1*self.Height,
+            '0.25H': head_x - 0.25*self.Height,
+            '0.5H': head_x - 0.5*self.Height,
             'H': head_x - self.Height
         }
         y_text = 0.32
-                # Add this after other plot calls in process_time_step
-        self.plot_velocity_vectors(
-            xi, yi, interpolated['uxi'], interpolated['uyi'], interpolated['alpha_i'],
-            time_v, positions, y_text,
-            title=f'Velocity Field (t={time_v})',
-            filename=f'velocity_t{time_v}.png',
-            skip_x=6,          # Adjust density (higher = sparser)
-            skip_y=3,
-            scale = 3,
-            arrow_scale=1.2,
-            alpha_opacity=0.7,
-            alpha_cmap='gray_r',
-            velocity_zero_points=velocity_zero_points,  # 新增参数
-      # Or use speed for colormap (see below)
+   
+                #Add this after other plot calls in process_time_step
+                # 从 results DataFrame 提取 H 高度的坐标点
+        # h_points = [(row['x'], row['H_depth']) for _, row in df.iterrows()]
+    #     self.plot_velocity_vectors(
+    #         xi, yi, interpolated['uxi'], interpolated['uyi'], interpolated['alpha_i'],
+    #         time_v, positions, y_text,
+    #         title=f'Velocity Field (t={time_v}s)',
+    #         filename=f'velocity_t{time_v}.png',
+    #         skip_x=6,          # Adjust density (higher = sparser)
+    #         skip_y=3,
+    #         scale = 3,
+    #         arrow_scale=1.0,
+    #         alpha_opacity=0.7,
+    #         alpha_cmap='gray_r',
+    #         velocity_zero_points=velocity_zero_points,  # 新增参数
+    #         h_points = h_points,  # H高度点
+    #         normalize_x=False,  # 是否进行无量纲化
+    #         head_x=head_x,    # 头部位置
+    #         H0=self.Height,   # 初始高度
+    #   # Or use speed for colormap (see below)
+    #     )
+
+    #     self.plot_velocity_vectors2(
+    #         xi, yi, interpolated['uxi'], interpolated['uyi'], interpolated['alpha_i'],
+    #         time_v, positions, y_text,
+    #         title=f'Velocity Field (t={time_v}s)',
+    #         filename=f'velocity_t{time_v}.png',
+    #         skip_x=6,          # Adjust density (higher = sparser)
+    #         skip_y=3,
+    #         scale = 3,
+    #         arrow_scale=1.0,
+    #         alpha_opacity=0.7,
+    #         alpha_cmap='gray_r',
+    #         velocity_zero_points=velocity_zero_points,  # 新增参数
+    #         h_points = h_points,  # H高度点
+    #         normalize_x=False,  # 是否进行无量纲化
+    #         head_x=head_x,    # 头部位置
+    #         H0=self.Height,   # 初始高度
+    #   # Or use speed for colormap (see below)
+    #     )
+        
+    #     self.plot_velocity_vectors3(
+    #         xi, yi, interpolated['U_perturb'], interpolated['uyi'], interpolated['alpha_i'],
+    #         time_v, positions, y_text,
+    #         title=f'Rotation velocity Field (t={time_v}s)',
+    #         filename=f'rotation_velocity_t{time_v}.png',
+    #         skip_x=6,          # Adjust density (higher = sparser)
+    #         skip_y=3,
+    #         scale = 5,
+    #         arrow_scale=5,
+    #         alpha_opacity=0.7,
+    #         alpha_cmap='gray_r',
+    #         velocity_zero_points=velocity_zero_points,  # 新增参数
+    #         h_points = h_points,  # H高度点
+    #         normalize_x=False,  # 是否进行无量纲化
+    #         head_x=head_x,    # 头部位置
+    #         H0=self.Height,   # 初始高度
+    #         Hi=H_depth
+            
+    #   # Or use speed for colormap (see below)
+    #     )
+
+
+
+
+        # Generate plots
+        self.plot_streamlines(
+            xi, yi, interpolated['U_perturb'], interpolated['uyi'], 
+            interpolated['U_perturb'], interpolated['alpha_i'], time_v, 
+            positions, y_text, f'Rotation Velocity Streamlines (t={time_v})',
+            f'Rotation_streamlines_t{time_v}s.png', 
+            "$\hat{U}_s$ [m/s]", -0.3, 0.07
         )
- 
-
-
-
-
-        # # Generate plots
-        # self.plot_streamlines(
-        #     xi, yi, interpolated['U_perturb'], interpolated['uyi'], 
-        #     interpolated['U_perturb'], interpolated['alpha_i'], time_v, 
-        #     positions, y_text, f'Perturbation Velocity Streamlines (t={time_v})',
-        #     f'perturbation_streamlines_t{time_v}.png', 
-        #     "Velocity Perturbation $U_a\'$ [m/s]", -0.2, 0.05
-        # )
 
         # self.plot_streamlines(
         #     xi, yi, interpolated['U_perturb'], interpolated['uyi'], 
@@ -518,7 +957,7 @@ class TurbidityCurrentAnalyzer:
         #     interpolated['uxi'], interpolated['alpha_i'], time_v, 
         #     positions, y_text, f'Original Velocity Streamlines (t={time_v})',
         #     f'origin_streamlines_t{time_v}.png', 
-        #     "Velocity $U_a$ [m/s]", 0.1, 0.2
+        #     "Velocity $U_s$ [m/s]", -0.1, 0.1
         # )
 
         # self.plot_contour(
