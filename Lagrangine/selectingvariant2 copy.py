@@ -38,6 +38,7 @@ def get_output_files():
         'production_xy': f'x{a_id}xProduction_xy.csv',
         'production_dudx': f'x{a_id}xProduction_dudx.csv',
         'production_dvdy': f'x{a_id}xProduction_dvdy.csv',
+        'G': f'x{a_id}xG.csv',
         # 'grad_dudx': f'x{a_id}xGrad_dudx.csv',
         # 'grad_dvdy': f'x{a_id}xGrad_dvdy.csv',
         # 'dragpart': f'x{a_id}xDragPart.csv',
@@ -65,109 +66,53 @@ def get_output_files():
         'FX': f'x{a_id}xFX.csv',    
         'FY': f'x{a_id}xFY.csv',
         'k.b': f'x{a_id}xk_b.csv',
+        'vorticity': f'x{a_id}xvorticity.csv',
     }
 
 
-def calculate_derived_values(xvalue,yvalue, alpha, kinetic_energy, gamma, grad_dudx, grad_dvdx, 
-                           grad_dudy, grad_dvdy, nutb, uavalue, ubvalue, uavalueyy, 
-                           ubvalueyy, grad_alpha1, grad_alpha2, grad_beta1, grad_beta2, omega, grad_vortx, grad_vorty,
-                           uavalueorigin,vorticity_z,grad_k1dx,grad_k2dy,dx,dy
+def calculate_derived_values( 
+        xvalue,yvalue, alpha, kinetic_energy,
+       nutb, uavalue, ubvalue, uavalueyy, ubvalueyy,
+        omega_value,
+        uavalueorigin,dx,dy,grad_dudx,grad_dvdx,grad_dudy,grad_dvdy,grad_dudz,grad_dvdz
                            ):
     """计算衍生量"""
+    # ############################################################### #
+    # ##                   ↓↓↓ 添加调试代码 ↓↓↓                    ## #
+    # print("--- Debugging Shapes in calculate_derived_values ---")
+    # print(f"alpha.shape: {alpha.shape}")
+    # print(f"nutb.shape: {nutb.shape}")
+    # print(f"kinetic_energy.shape: {kinetic_energy.shape}")
+    # print(f"grad_dudy.shape: {grad_dudy.shape}")
+    # print(f"grad_dvdx.shape: {grad_dvdx.shape}")
+    # print(f"grad_dudx.shape: {grad_dudx.shape}")
+    # print(f"grad_dvdy.shape: {grad_dvdy.shape}")
+    # print("----------------------------------------------------")
+    # ############################################################### #
     # rho_mix = alpha * 2217 + 1000
     # drhody = np.gradient(rho_mix, yvalue)
     
 
-    # with np.errstate(divide='ignore', invalid='ignore'):
-    #     Rig = -9.81 * drhody / (1000 * grad_dudy**2)
-    #     Rigg = -9.81*2217*grad_alpha2 / (1000 * grad_dudy**2)
-    #     Rig = np.nan_to_num(Rig, nan=0.0, posinf=0.0, neginf=0.0)
-    #     Rigg = np.nan_to_num(Rigg, nan=0.0, posinf=0.0, neginf=0.0)
-
-    
-
-    
-    reynolds12 = nutb * (grad_dudy + grad_dvdx)*1000
-    reynolds11 = nutb * (grad_dudx + grad_dvdx-2/3*kinetic_energy)*1000
-    reynolds22 = nutb * (grad_dvdy + grad_dvdy-2/3*kinetic_energy)*1000
-    center = (yvalue[1:] - yvalue[:-1]) / 2 + yvalue[:-1]
-    yplus = np.sqrt(1e-6 * grad_dudy[0]) * center / 1e-6
-    shearstress = grad_dudy+grad_dvdx
-    production_xy = (1-alpha)*1000*nutb * (grad_dudy**2+grad_dvdx**2+2*grad_dudy*grad_dvdx) 
-    production_dudx = (1-alpha)*1000*nutb * (2*grad_dudx**2)- (1-alpha)*2/3*1000*kinetic_energy *grad_dudx
-    production_dvdy = (1-alpha)*1000*nutb * (2*grad_dvdy**2)- (1-alpha)*2/3*1000*kinetic_energy *grad_dvdy
+    kinetic_energy = kinetic_energy
+    production_xy = (1-alpha)*1000*nutb * (grad_dudy+grad_dvdx)**2+grad_dudz**2+grad_dvdz**2
+    production_dudx = (1-alpha)*1000*nutb * (2*grad_dudx**2)-2/3*(1-alpha)*1000*nutb*(grad_dudx+grad_dvdy)**2
+    production_dvdy = (1-alpha)*1000*nutb * (2*grad_dvdy**2)-2/3*(1-alpha)*1000*nutb*(grad_dudx+grad_dvdy)**2
     production = production_xy + production_dudx + production_dvdy
+    
+
+
     # dragpart = gamma * ((ubvalue-uavalue)*grad_alpha1 + (ubvalueyy-uavalueyy)*grad_alpha2)* nutb /(1-alpha)
 
-    tauxx = 1e-3*grad_dudx*2
-    tauxy = 1e-3*(grad_dudy+grad_dvdx)
-    tauyy = 1e-3*grad_dvdy*2
-    seoxx = grad_beta1**2/(1-alpha)
-    seoxy = (grad_beta1*grad_beta2)/(1-alpha)
-    seoyy = grad_beta2**2/(1-alpha)
-    buoyancy = nutb*(tauxx*seoxx + 2*tauxy*seoxy + tauyy*seoyy)
-     
-    dissipation = -(1-alpha)*1000*0.09*kinetic_energy*omega
-    drag1 = gamma*nutb*1/(1-alpha)*(grad_alpha1*(ubvalue-uavalue)+grad_alpha2*(ubvalueyy - uavalueyy))
-    Fx =  (1-alpha)*1000*(1e-6+nutb*0.6)*grad_k1dx
-    Fy =  (1-alpha)*1000*(1e-6+nutb*0.6)*grad_k2dy
-    dFx_dx = np.gradient(Fx) / dx  # ∂Fx/∂x
-    dFy_dy = np.gradient(Fy) / dy # ∂Fy/∂y
-    transport = dFx_dx + dFy_dy
 ################################################################################
 
     
     ### calculating the vorticity related quantities ####
 
-    advection = (1-alpha) * 1000 *(ubvalue * grad_vortx + ubvalueyy * grad_vorty)
-    drag_part1 = -gamma*grad_alpha2*(ubvalue-uavalue)+gamma*grad_alpha1*(ubvalueyy - uavalueyy)
-    drag_part2 = -alpha*gamma*vorticity_z
 
         # Find the y-coordinate where alpha crosses below 1e-5
         # 首先筛选出 y > 0.005 的点
-    y_threshold = 0.005
-    valid_mask = yvalue > y_threshold
 
-    # if np.any(valid_mask):
-    #         # 在有效范围内寻找 alpha < 1e-5 的点
-    #         alpha_threshold = 1e-5
-    #         below_threshold = (alpha[valid_mask] < alpha_threshold)
-            
-    #         if np.any(below_threshold):
-    #             # 找到第一个满足条件的点的相对索引
-    #             first_below_rel_index = np.argmax(below_threshold)
-    #             # 转换为原始数组中的绝对索引
-    #             valid_indices = np.where(valid_mask)[0]
-    #             max_ya_crossing_index_alpha = valid_indices[first_below_rel_index]
-    #             y_crossing_alpha = yvalue[max_ya_crossing_index_alpha]  # 修正变量名
-    #             u_crossing_alpha = uavalue[max_ya_crossing_index_alpha]
-    #             #print(f"Found y_crossing at {y_crossing_alpha} for xx={xx}")
-    #         else:
-    #             # 如果没有找到，使用有效范围内的最大y值
-    #             max_ya_crossing_index_alpha = np.where(valid_mask)[0][-1]
-    #             y_crossing_alpha = yvalue[max_ya_crossing_index_alpha]  # 修正变量名
-    #             u_crossing_alpha = uavalue[max_ya_crossing_index_alpha]
-    #             #print(f"No alpha < {alpha_threshold} found above y={y_threshold} for xx={xx}, using max y={y_crossing_alpha}")
-    # else:
-    #         # 如果没有y>0.005的点，使用最后一个点
-    #         max_ya_crossing_index_alpha = len(yvalue) - 1
-    #         y_crossing_alpha = yvalue[max_ya_crossing_index_alpha]  # 修正变量名
-    #         u_crossing_alpha = uavalue[max_ya_crossing_index_alpha]  # 无法定义
 
-    #     # Vectorized integration
-    # ua_alpha_alpha = uavalue * alpha
-    # integral_alpha = np.trapz(ua_alpha_alpha[:max_ya_crossing_index_alpha], yvalue[:max_ya_crossing_index_alpha])
-    # integralU_alpha = np.trapz(uavalue[:max_ya_crossing_index_alpha], yvalue[:max_ya_crossing_index_alpha])
-    # integralU2_alpha = np.trapz(uavalue[:max_ya_crossing_index_alpha]**2, yvalue[:max_ya_crossing_index_alpha])
-    # integral2_alpha = np.trapz((uavalue[:max_ya_crossing_index_alpha] * alpha[:max_ya_crossing_index_alpha])**2, yvalue[:max_ya_crossing_index_alpha])
-        
-    #     # Calculate derived quantities
-    # U_alpha = integralU2_alpha / integralU_alpha if integralU_alpha != 0 else 0
-    # H_alpha = integral_alpha**2 / integral2_alpha if integral2_alpha != 0 else 0
-    # ALPHA_alpha = integral_alpha / integralU_alpha if integralU_alpha != 0 else 0
-    # H_depth_alpha = integralU_alpha**2 / integralU2_alpha if integralU2_alpha != 0 else 0
-                # 寻找速度正负交界点
-    # mask = (X == closest_x) & (Y >= 0) & (alpha > alpha_threshold)
     mask2 = alpha > alpha_threshold
     uavalue = uavalue[mask2]  
     yvalue = yvalue[mask2]     
@@ -198,28 +143,17 @@ def calculate_derived_values(xvalue,yvalue, alpha, kinetic_energy, gamma, grad_d
     H_depth = Uh**2 / U2h if U2h != 0 else 0
 
     u_hat = uavalueorigin - U 
-    kinetic_energy = 1e4*kinetic_energy
+
 
 
     return {
         # 'Rig': Rig.tolist(),
         # 'Rigg': Rigg.tolist(),
         # 'omegaz': omegaz.tolist(),
-        'reynolds12': reynolds12.tolist(),
-        'reynolds11': reynolds11.tolist(),
-        'reynolds22': reynolds22.tolist(),
-        'yplus': yplus.tolist(),
-        'grad_dudx': grad_dudx.tolist(),
-        'grad_dvdy': grad_dvdy.tolist(),
+ 
         'alpha': alpha.tolist(),
-        'shearstress': shearstress.tolist(),
         'production': production.tolist(),
-        'production_xy': production_xy.tolist(),
-        'production_dudx': production_dudx.tolist(),
-        'production_dvdy': production_dvdy.tolist(),
-        # 'dragpart': dragpart.tolist(),
-        'buoyancy': buoyancy.tolist(),
-        'dissipation': dissipation.tolist(),
+ 
 
         # 'H': [H],
         'U': [U],
@@ -229,20 +163,15 @@ def calculate_derived_values(xvalue,yvalue, alpha, kinetic_energy, gamma, grad_d
         # 'U_alpha': [U_alpha],
         # 'ALPHA_alpha': [ALPHA_alpha],
         # 'H_depth_alpha': [H_depth_alpha],
-        'advection': advection.tolist(),
+   
         'ycrossing': [y_crossing],
         'uhat': u_hat.tolist(),
-        'dragpart1': drag_part1.tolist(),
-        'dragpart2': drag_part2.tolist(),
-        'drag1': drag1.tolist(),
-        'transport': transport.tolist(),
-        'FX': Fx.tolist(),
-        'FY': Fy.tolist(),
+
 
     
     }
 
-def process_time_step(sol, time_v, X, Y,dx,dy):
+def process_time_step(sol, time_v, X, Y,Z,dx,dy,z0):
     """处理单个时间步"""
     # 读取场数据
     
@@ -252,13 +181,26 @@ def process_time_step(sol, time_v, X, Y,dx,dy):
     nutb = fluidfoam.readscalar(sol, str(time_v), "nut.b")
     kb = fluidfoam.readscalar(sol, str(time_v), "k.b")
     omegab = fluidfoam.readscalar(sol, str(time_v), "omega.b")
-    grad_Ub = fluidfoam.readtensor(sol, str(time_v), "grad(U.b)")
-    grad_alpha = fluidfoam.readvector(sol, str(time_v), "grad(alpha.a)")
-    grad_beta = fluidfoam.readvector(sol, str(time_v), "grad(alpha.b)")
-    gamma = fluidfoam.readscalar(sol, str(time_v), "K")
-    vorticity_grad = fluidfoam.readtensor(sol, str(time_v), "grad(vorticity)")
     vorticity = fluidfoam.readvector(sol, str(time_v), "vorticity")
-    grad_k = fluidfoam.readvector(sol, str(time_v), "grad(k.b)")
+    gradUa = fluidfoam.readtensor(sol, str(time_v), "grad(U.a)")
+
+    G = 2*(gradUa[0]**2 + gradUa[4]**2 + gradUa[8]**2) + \
+        (gradUa[1]+gradUa[3])**2 + (gradUa[2]+gradUa[6])**2 + (gradUa[5]+gradUa[7])**2 -\
+        -2/3*(gradUa[0]+gradUa[4]+gradUa[8])**2
+    
+
+    # z_mask = np.isclose(Z, 0.255)  # 或用 Z == 0（如果数据是精确的）
+    z_mask = np.isclose(Z,z0)
+    Ua = Ua[:, z_mask]
+    Ub = Ub[:, z_mask]
+    alpha = alpha[z_mask]
+    nutb = nutb[z_mask]
+    kb = kb[z_mask]
+    omegab = omegab[z_mask]
+    vorticity = vorticity[:,z_mask]
+    gradUa = gradUa[:,z_mask]
+    G = G[z_mask]
+
 
     # 定位头部位置
     head_x = None
@@ -275,11 +217,7 @@ def process_time_step(sol, time_v, X, Y,dx,dy):
     unique_x = np.unique(X)
     closest_x = unique_x[np.argmin(np.abs(unique_x - target_x))]
     
-    # # 提取数据
-    # mask = np.isclose(X, closest_x, atol=1e-6, rtol=1e-6)
-    # if not np.any(mask):
-    #     print(f"Warning: No points found at x={closest_x:.3f}m for t={time_v}")
-    #     return None
+
     
     mask = (X == closest_x) & (Y >= 0)
 
@@ -297,28 +235,27 @@ def process_time_step(sol, time_v, X, Y,dx,dy):
     max_ke = kinetic_energy.max()
     ke_dimless = kinetic_energy / max_ke if max_ke != 0 else kinetic_energy
     omega_value = omegab[mask]
-    grad_dudx = grad_Ub[0][mask]
-    grad_dudy = grad_Ub[3][mask]
-    grad_dvdx = grad_Ub[1][mask]
-    grad_dvdy = grad_Ub[4][mask]
-    grad_alpha1 = grad_alpha[0][mask]
-    grad_alpha2 = grad_alpha[1][mask]
-    grad_beta1 = grad_beta[0][mask]
-    grad_beta2 = grad_beta[1][mask]
-    grad_vortx = vorticity_grad[2][mask]
-    grad_vorty = vorticity_grad[5][mask]
-    vorticity_z = vorticity[2][mask]
-    grad_k1dx = grad_k[0][mask]
-    grad_k2dy = grad_k[1][mask]
+    vorticity = vorticity[2][mask]  # 提取z方向的涡量分量
+    grad_dudx = gradUa[0][mask]
+    grad_dvdx = gradUa[1][mask]
+    grad_dudy = gradUa[3][mask]
+    grad_dvdy = gradUa[4][mask]
+    grad_dudz = gradUa[6][mask]
+    grad_dvdz = gradUa[7][mask]
+ 
+
+
     dx = dx[mask]
     dy = dy[mask]
 
+
+
     # 计算衍生量
     derived = calculate_derived_values(
-        xvalue,yvalue, alpha_value, kinetic_energy, gamma[mask], grad_dudx, grad_dvdx,
-        grad_dudy, grad_dvdy, nutb_value, uavalue, ubvalue, uavalueyy, ubvalueyy,
-        grad_alpha1, grad_alpha2, grad_beta1, grad_beta2, omega_value,grad_vortx, grad_vorty,
-        uavalueorigin, vorticity_z,grad_k1dx,grad_k2dy,dx,dy
+        xvalue,yvalue, alpha_value, kinetic_energy,
+       nutb_value, uavalue, ubvalue, uavalueyy, ubvalueyy,
+        omega_value,
+        uavalueorigin,dx,dy,grad_dudx,grad_dvdx,grad_dudy,grad_dvdy,grad_dudz,grad_dvdz
     )
 
     return {
@@ -331,12 +268,12 @@ def process_time_step(sol, time_v, X, Y,dx,dy):
         'uadimless': (uavalue / 0.27).tolist(),
         'ubdimless': (ubvalue / 0.27).tolist(),
         'kinetic_energy': kinetic_energy.tolist(),
-        'grad_dvdy': grad_dvdy.tolist(),
-        'grad_dudx': grad_dudx.tolist(),
+        'vorticity': vorticity.tolist(),
         'uay': uavalueyy.tolist(),
         'uby': ubvalueyy.tolist(),
         'ke_dimless': ke_dimless.tolist(),
         'k.b': kb.tolist(),
+        'G': G.tolist(),
         **derived
     }
 
@@ -378,21 +315,27 @@ def main():
     # sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Fine_particle9/case090912_1"
     #sol="/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Coarse_paticle37/case370428_1"
     #sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Large_particle53/case530826_4"
-    sol = "/media/amber/53EA-E81F/PhD/case231020_6"
+    sol = "/media/amber/53EA-E81F/PhD/case231020_5"
+    # sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Middle_particle23/3D/case231020_5"
 
     X, Y, Z = fluidfoam.readmesh(sol)
+    z0 = 0.065
+    # 2. 提取 Z=0 的平面（浮点数比较用 np.isclose）
+    z_mask = np.isclose(Z, z0)  # 或用 Z == 0（如果数据是精确的）
+    X = X[z_mask]
+    Y = Y[z_mask]
     dx = np.gradient(X, axis=0)
     dy = np.gradient(Y, axis=0)
-    times = np.arange(4, 15, 1)  # 对应原来的1-79,步长2
+    times = np.arange(4, 12, 1)  # 对应原来的1-79,步长2
     results = []
     BASE_PATH = '/home/amber/postpro/selecting_variant/'
     # FILE_PREFIX = 'case230427_4midd'  # 修改这里即可自动更新文件名
     # FILE_PREFIX = 'case090912_1'  # 修改这里即可自动更新文件名
     #FILE_PREFIX = 'case530628_1'  # 修改这里即可自动更新文件名
-    FILE_PREFIX = 'case231020_6'  # 修改这里即可自动更新文件名
+    FILE_PREFIX = 'case231020_5side14'  # 修改这里即可自动更新文件名
 
     for time_v in times:
-        result = process_time_step(sol, time_v, X, Y,dx,dy)
+        result = process_time_step(sol, time_v, X, Y, Z, dx,dy,z0)
         if result:
             results.append(result)
 

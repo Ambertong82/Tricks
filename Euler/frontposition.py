@@ -33,17 +33,17 @@ import matplotlib.pyplot as plt
 #sol = "/media/amber/PhD_data_xtsun/PhD/saline/case0704_6"
 #sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Fine_particle9/case090429_1"
 #sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Fine_particle9/case090912_1"
-sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Middle_particle23/case230427_4fine"
-
+# sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Middle_particle23/case230427_4fine"
+sol = '/media/amber/53EA-E81F/PhD/case231020_5'
 #sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Middle_particle23/case230427_4"
 output_dir = "/home/amber/postpro/frontposition_turbidity"
 os.makedirs(output_dir, exist_ok=True)
-output_file = os.path.join(output_dir, 'front_position_d2327.csv')
+output_file = os.path.join(output_dir, 'front_position_2310205mid.csv')
 
 # 参数设置
 alpha_threshold = 1e-5   # alpha.a 的头部阈值
 y_min = 0                # 垂向积分下限（避免壁面影响）
-times = np.arange(1, 35, 1)
+times = np.arange(1, 40, 1)
 
 
 X, Y, Z = fluidfoam.readmesh(sol)
@@ -62,7 +62,7 @@ for time_v in times:
     head_x = None
 
     # 找到所有满足alpha阈值的点
-    valid_mask = (alpha_A > alpha_threshold) & (Y >= y_min)
+    valid_mask = (alpha_A > alpha_threshold) & (Y >= y_min) & (Z ==0.125)
     if not np.any(valid_mask):
         print(f"Warning: No head found at t={time_v}")
         continue

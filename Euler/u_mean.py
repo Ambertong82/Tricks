@@ -6,6 +6,8 @@ from scipy.interpolate import griddata
 import matplotlib.pyplot as plt
 from scipy.ndimage import gaussian_filter
 from matplotlib.colors import TwoSlopeNorm
+from sklearn.decomposition import PCA
+
 
 class TurbidityCurrentAnalyzer:
     def __init__(self):
@@ -15,8 +17,8 @@ class TurbidityCurrentAnalyzer:
         self.output_dir = "/home/amber/postpro/u_umean_tc"
         self.alpha_threshold = 1e-5
         self.y_min = 0
-        self.times = [7,10,12]
-        self.FIG_SIZE = (40, 8)
+        self.times = [10]
+        self.FIG_SIZE = (40, 6)
         self.X_LIM = (0.0, 1.6)
         self.Y_LIM = (0.0, 0.3)
         self.Height = 0.3
@@ -26,6 +28,13 @@ class TurbidityCurrentAnalyzer:
         self.ALPHA_CONTOUR_PARAMS = {
             'levels': [1e-5],
             'colors': 'black',
+            'linewidths': 2,
+            'linestyles': 'dashed',
+            'zorder': 3
+        }
+        self.ALPHA_CONTOUR_PARAMS2 = {
+            'levels': [1e-3],
+            'colors': 'blueviolet',
             'linewidths': 2,
             'linestyles': 'dashed',
             'zorder': 3
@@ -73,15 +82,9 @@ class TurbidityCurrentAnalyzer:
                 break
         else:
             max_ya_crossing_index = len(ya) - 1  # 没找到则默认取最高处
+        # method 2: 取最大值位置    
         # max_ya_crossing_index = sign_changes[np.argmax(ya[sign_changes])] + 1 if len(sign_changes) > 0 else len(ya) - 1
-        # Find front height
-        # velocity_sign_changes = np.diff(np.sign(ua_x)) != 0  # 速度符号变化的点 (n-1)
-        # valid_height_mask = ya[:-1] > 1e-4                  # 排除 y <= 0.005 的点 (n-1)
-        
-        # # 逻辑与合并条件（注意 ya[:-1] 因为 diff 结果长度是 n-1）
-        # sign_changes = np.where(np.logical_and(velocity_sign_changes, valid_height_mask))[0]
-        # 获取最高位置的交点（若无交点则用最后一个点）
-        #max_ya_crossing_index = sign_changes[np.argmax(ya[sign_changes])] + 1 if len(sign_changes) > 0 else len(ya) - 1
+
         
         # Vectorized integration
         ua_alpha = ua_x * alpha_vals
@@ -90,11 +93,12 @@ class TurbidityCurrentAnalyzer:
         integralU2 = np.trapz(ua_x[:max_ya_crossing_index]**2, ya[:max_ya_crossing_index])
         integral2 = np.trapz((ua_x[:max_ya_crossing_index] * alpha_vals[:max_ya_crossing_index])**2, ya[:max_ya_crossing_index])
         
-        # Calculate derived quantities
         U = integralU2 / integralU if integralU != 0 else 0
+        H = integral**2 / integral2 if integral2 != 0 else 0
+        ALPHA = integral / integralU if integralU != 0 else 0
         H_depth = integralU**2 / integralU2 if integralU2 != 0 else 0
-
-        return U, H_depth, ya[max_ya_crossing_index]
+        
+        return U, H, ALPHA, H_depth, ya[max_ya_crossing_index]
 
     def calculate_perturbation_fields(self, X, Y, Ua_A, x_coords, x_U_mapping, x_U_mapping_alpha, gradbeta_x, omega_z, gradvorticity_x, beta):
         """Calculate perturbation velocity and advection fields"""
@@ -132,14 +136,17 @@ class TurbidityCurrentAnalyzer:
                         title, filename, color_label, vmin=None, vmax=None):
         """Generic streamline plotting function"""
         plt.figure(figsize=self.FIG_SIZE)
-        
+        mask = alpha_i > 1e-5  # 找出 alpha_i > 1e-5 的区域
+        ux_masked = np.where(mask, ux, 0)   # 不符合条件的区域速度设为 0
+        uy_masked = np.where(mask, uy, 0)   # 不符合条件的区域速度设为 0
+
         if vmin is not None and vmax is not None:
             color_field = np.clip(color_field, vmin, vmax)
         # 1. Plot alpha concentration cloud map (background)
         cf = plt.contourf(
             xi, yi, alpha_i,
             levels=np.linspace(0, 0.015, 128),                   # 颜色分级数
-            cmap='Purples',              # 云图颜色映射
+            cmap='gray_r',              # 云图颜色映射
             alpha=0.75,          # 透明度
             antialiased=True,             # 抗锯齿
             zorder=1
@@ -148,47 +155,50 @@ class TurbidityCurrentAnalyzer:
         
      
          # --- 关键修改：强制颜色映射范围为 [vmin, 0.2]，即使 vmax < 0.2 ---
-        norm_stream= plt.Normalize(vmin=vmin, vmax=vmax)  # 固定颜色条上限为 0.2
+        # norm_stream= plt.Normalize(vmin=vmin, vmax=vmax)  # 固定颜色条上限为 0.2
         # speed = np.sqrt(ux**2 + uy**2)
         strm = plt.streamplot(
-            xi, yi, ux, uy,
-            color=color_field,
-            cmap='turbo',
+            xi, yi, ux_masked, uy_masked,
+            # color='#04d8b2',
+            color = '#0343df',
+            # cmap='turbo',
             linewidth=1,
             density=5,
-            arrowsize=2.5,
+            arrowsize=2,
             arrowstyle='->',
             zorder=2,
-            norm=norm_stream
+           
         )
+
+
 
         # cbar = plt.colorbar(strm.lines, label=color_label, orientation='horizontal', fraction=0.045,aspect = 30, pad=0.2)
                 # --- 3. 双颜色条（水平对齐）---
         # (A) Contourf colorbar (左侧)
-        cbar_alpha = plt.colorbar(
-            cf,
-            label=r'$\alpha_s$',
-            orientation='horizontal',
-            pad=0.15,   # 调整间距（与stream bar一致）
-            aspect=30,
-            shrink=0.45,  # 缩小宽度以适应左侧
-        )
+        # cbar_alpha = plt.colorbar(
+        #     cf,
+        #     label=r'$\alpha_s$',
+        #     orientation='horizontal',
+        #     pad=0.15,   # 调整间距（与stream bar一致）
+        #     aspect=30,
+        #     shrink=0.2,  # 缩小宽度以适应左侧
+        # )
         # 手动调整 contounf 颜色条位置 [左, 下, 宽, 高]
-        cbar_alpha.ax.set_position([0.20, 0.35, 0.30, 0.03])  # 左对齐，高度与stream bar一致
-        cbar_alpha.set_ticks([0.000, 0.0075, 0.015])
+        #cbar_alpha.ax.set_position([0.20, 0.35, 0.30, 0.03])  # 左对齐，高度与stream bar一致
+        # cbar_alpha.set_ticks([0.000, 0.0075, 0.015])
 
         # (B) Streamplot colorbar (右侧)
-        cbar_speed = plt.colorbar(
-            strm.lines,
-            label='Velocity [m/s]',
-            orientation='horizontal',
-            pad=0.15,    # 保持原位置
-            aspect=30,
-            shrink=0.45,  # 缩小宽度以适应右侧
-        )
+        # cbar_speed = plt.colorbar(
+        #     strm.lines,
+        #     label='Velocity [m/s]',
+        #     orientation='horizontal',
+        #     pad=0.15,    # 保持原位置
+        #     aspect=30,
+        #     shrink=0.45,  # 缩小宽度以适应右侧
+        # )
         # 手动调整 stream 颜色条位置 [左, 下, 宽, 高]
-        cbar_speed.ax.set_position([0.50, 0.35, 0.30, 0.03])  # 右对齐，高度与alpha bar一致
-        cbar_speed.set_ticks([vmin, (vmin+vmax)/2, vmax])
+        #cbar_speed.ax.set_position([0.50, 0.35, 0.30, 0.03])  # 右对齐，高度与alpha bar一致
+        #cbar_speed.set_ticks([vmin, (vmin+vmax)/2, vmax])
         #cbar.ax.tick_params(labelsize=10)
 
         #cbar.set_label( label=r'$\alpha_s$',fontsize=12)
@@ -208,34 +218,196 @@ class TurbidityCurrentAnalyzer:
         plt.savefig(os.path.join(self.output_dir, filename), dpi=300, bbox_inches='tight')
         plt.close()
 
+    def plot_streamlines2(self, xi, yi, ux, uy, color_field, alpha_i, time_v, positions, y_text, 
+                        title, filename, color_label, vmin=None, vmax=None):
+        """Generic streamline plotting function"""
+        plt.figure(figsize=self.FIG_SIZE, constrained_layout=True)
+        mask = alpha_i > 1e-5  # 找出 alpha_i > 1e-5 的区域
+        
+
+        if vmin is not None and vmax is not None:
+            color_field = np.clip(color_field, vmin, vmax)
+        # 1. Plot alpha concentration cloud map (background)
+        cf = plt.contourf(
+            xi, yi, alpha_i,
+            levels=np.linspace(0, 0.015, 128),                   # 颜色分级数
+            cmap='gray_r',              # 云图颜色映射
+            alpha=0.7,          # 透明度
+            antialiased=True,             # 抗锯齿
+            zorder=1
+            
+        )
+        
+     
+         # --- 关键修改：强制颜色映射范围为 [vmin, 0.2]，即使 vmax < 0.2 ---
+        # norm_stream= plt.Normalize(vmin=vmin, vmax=vmax)  # 固定颜色条上限为 0.2
+        speed = np.sqrt(ux**2 + uy**2)
+        strm = plt.streamplot(
+            xi, yi, ux, uy,
+            # color='#04d8b2',
+            color = color_field,
+            cmap='coolwarm',
+            # cmap='turbo',
+            linewidth=1,
+            density=5,
+            arrowsize=2,
+            arrowstyle='->',
+            zorder=2,
+           
+        )
+
+        
+        plt.contour(xi, yi, alpha_i, **self.ALPHA_CONTOUR_PARAMS)
+        # plt.contour(xi, yi, alpha_i, **self.ALPHA_CONTOUR_PARAMS2)
+
+        for label, x_pos in positions.items():
+            plt.axvline(x=x_pos, color=self.colorset, linestyle='dashdot', linewidth=1, zorder=3)
+            plt.text(x_pos + 0.005, y_text, f'{label}', fontsize=20, zorder=3, color=self.colorset)
+        
+        plt.gca().set_aspect('auto')
+        plt.xlabel('x [m]')
+        plt.ylabel('y [m]')
+        plt.xlim(*self.X_LIM)
+        plt.ylim(*self.Y_LIM)
+        plt.title(title)
+        plt.savefig(os.path.join(self.output_dir, filename), dpi=300, bbox_inches='tight')
+        plt.close()
+
     def plot_contour(self, xi, yi, field, alpha_i, time_v, positions, y_text, 
                      title, filename, color_label, levels=None, cmap='bwr'):
         """Generic contour plotting function"""
         plt.figure(figsize=self.FIG_SIZE)
         
-        if levels is None:
-            levels = np.linspace(np.nanmin(field), np.nanmax(field), 21)
         
-        contour = plt.contourf(
-            xi, yi, field,
-            levels=levels,
-            cmap=cmap,
-            extend='both'
-        )
+        # contour = plt.contourf(
+        #     xi, yi, alpha_i,
+        #     levels=np.linspace(0, 0.015, 128),                   # 颜色分级数
+        #     cmap='gray_r',              # 云图颜色映射
+        #     alpha=1,          # 透明度
+        #     antialiased=True,             # 抗锯齿
+        #     zorder=1
+        # )
         
         plt.contour(xi, yi, alpha_i, **self.ALPHA_CONTOUR_PARAMS)
         
         for label, x_pos in positions.items():
-            plt.axvline(x=x_pos, color='lightcoral', linestyle='dashdot', linewidth=1.5, zorder=3)
-            plt.text(x_pos + 0.005, y_text, f'{label}', fontsize=15, zorder=3, color='lightcoral')
+            plt.axvline(x=x_pos, color=self.colorset, linestyle='dashdot', linewidth=1, zorder=3)
+            plt.text(x_pos + 0.005, y_text, f'{label}', fontsize=20, zorder=3, color=self.colorset)
         
-        cbar = plt.colorbar(contour, label=color_label, orientation='horizontal')
+        # cbar = plt.colorbar(contour, label=color_label, orientation='horizontal',)
         plt.xlabel('x [m]')
         plt.ylabel('y [m]')
         plt.xlim(*self.X_LIM)
         plt.title(title)
         plt.savefig(os.path.join(self.output_dir, filename), dpi=300, bbox_inches='tight')
         plt.close()
+
+    def plot_vorticity_contour(self, xi, yi, ux, uy, alpha_i, time_v, 
+                             positions, y_text, title, filename, levels=None, 
+                             cmap='bwr'):
+        """
+        绘制涡量云图（使用ux_perturb = ux - U 和原始uy计算涡量）
+        
+        参数：
+            xi, yi: 网格坐标
+            ux: 原始x方向速度
+            uy: 原始y方向速度
+            ux_perturb: 扰动速度 (ux - U)
+            alpha_i: 颗粒浓度场
+            time_v: 时间步
+            positions: 垂直线位置字典
+            y_text: 垂直线标注的y位置
+            title: 图标题
+            filename: 保存文件名
+            levels: 云图色阶
+            cmap: 颜色映射
+        """
+        plt.figure(figsize=self.FIG_SIZE)
+        # 1. Plot alpha concentration cloud map (background)
+        # cf = plt.contourf(
+        #     xi, yi, alpha_i,
+        #     levels=np.linspace(0, 0.015, 128),                   # 颜色分级数
+        #     cmap='gray_r',              # 云图颜色映射
+        #     alpha=0.7,          # 透明度
+        #     antialiased=True,             # 抗锯齿
+        #     zorder=1
+        # )
+            
+        # 1. 计算涡量 (ω_z = dv/dx - du/dy)
+        # 使用扰动速度计算du/dy，原始速度计算dv/dx
+        dy = yi[1,0] - yi[0,0]  # y方向网格间距
+        dx = xi[0,1] - xi[0,0]  # x方向网格间距
+        
+        # 计算速度梯度 (中心差分)
+        duy = np.gradient(ux, dy, axis=0)  # ∂u'/∂y
+        dvx = np.gradient(uy, dx, axis=1)          # ∂v/∂x
+        
+        # z方向涡量
+        omega_z = dvx - duy
+                # 1. Plot alpha concentration cloud map (background)
+
+        # 2. 绘制云图
+        if levels is None:
+            # 自动确定色阶范围（对称）
+            max_val = np.nanmax(np.abs(omega_z))
+            levels = np.linspace(-max_val, max_val, 41)
+        
+        contour = plt.contourf(
+            xi, yi, omega_z,
+            levels=levels,
+            cmap=cmap,
+            extend='both',
+            alpha=0.5,
+            zorder = 1
+        )
+        mask = alpha_i > 1e-5  # 找出 alpha_i > 1e-5 的区域
+        ux_masked = np.where(mask, ux, 0)   # 不符合条件的区域速度设为 0
+        uy_masked = np.where(mask, uy, 0)   # 不符合条件的区域速度设为 0
+
+
+        # 1. Plot alpha concentration cloud map (background)
+
+        
+     
+         # --- 关键修改：强制颜色映射范围为 [vmin, 0.2]，即使 vmax < 0.2 ---
+        # norm_stream= plt.Normalize(vmin=vmin, vmax=vmax)  # 固定颜色条上限为 0.2
+        # speed = np.sqrt(ux**2 + uy**2)
+        strm = plt.streamplot(
+            xi, yi, ux_masked, uy_masked,
+            # color='#04d8b2',
+            color = '#0343df',
+            # cmap='turbo',
+            linewidth=1,
+            density=5,
+            arrowsize=2,
+            arrowstyle='->',
+            zorder=2,
+           
+        )
+
+        # 3. 添加颗粒浓度等值线
+        plt.contour(xi, yi, alpha_i, **self.ALPHA_CONTOUR_PARAMS)
+        # plt.contour(xi, yi, alpha_i, **self.ALPHA_CONTOUR_PARAMS2)
+        # 4. 添加参考线/标签
+        for label, x_pos in positions.items():
+            plt.axvline(x=x_pos, color=self.colorset, linestyle='dashdot', 
+                       linewidth=1, zorder=3)
+            plt.text(x_pos + 0.005, y_text, f'{label}', 
+                    fontsize=20, zorder=3, color=self.colorset)
+        
+        # 5. 添加颜色条和其他装饰
+        # cbar = plt.colorbar(contour, label='Vorticity $\omega_z$ [1/s]', 
+        #                    orientation='horizontal', shrink=0.3,pad = 0.2)
+        plt.xlabel('x [m]')
+        plt.ylabel('y [m]')
+        plt.xlim(*self.X_LIM)
+        plt.ylim(*self.Y_LIM)
+        plt.title(title)
+        
+        # 6. 保存图像
+        plt.savefig(os.path.join(self.output_dir, filename), 
+                   dpi=300, bbox_inches='tight')
+        plt.close()    
 
 
 
@@ -371,24 +543,24 @@ class TurbidityCurrentAnalyzer:
             )    
 
 
-        #     # === 新增：绘制积分H连线 ===
-        # if h_points and len(h_points) > 0:
-        #     h_x, h_y = zip(*h_points)
+            # === 新增：绘制积分H连线 ===
+        if h_points and len(h_points) > 0:
+            h_x, h_y = zip(*h_points)
             
-        #     # 按 x 坐标排序以确保连线顺序正确
-        #     sorted_indices = np.argsort(h_x)
-        #     h_x_sorted = np.array(h_x)[sorted_indices]
-        #     h_y_sorted = np.array(h_y)[sorted_indices]
+            # 按 x 坐标排序以确保连线顺序正确
+            sorted_indices = np.argsort(h_x)
+            h_x_sorted = np.array(h_x)[sorted_indices]
+            h_y_sorted = np.array(h_y)[sorted_indices]
             
-        #     # 绘制虚线
-        #     plt.plot(
-        #         h_x_sorted, h_y_sorted,
-        #         color='red',               # 蓝色虚线（可自定义）
-        #         linestyle='--',
-        #         linewidth=2,
-        #         label='Velocity Zero Crossing',
-        #         zorder=4                    # 确保在箭头上方
-        #     ) 
+            # 绘制虚线
+            plt.plot(
+                h_x_sorted, h_y_sorted,
+                color='purple',               # 蓝色虚线（可自定义）
+                linestyle='--',
+                linewidth=2,
+                label='Velocity Zero Crossing',
+                zorder=4                    # 确保在箭头上方
+            ) 
 
 
 
@@ -715,6 +887,103 @@ class TurbidityCurrentAnalyzer:
 
 
 
+    def measure_vortex_dimensions(self, xi, yi, u_rot, v_rot, alpha_i, min_vorticity=0.1):
+        """
+        量化每个涡旋的长宽尺寸（物理尺度）
+        
+        参数:
+            u_rot, v_rot : 旋转速度场分量（需先减去背景平均流）
+            min_vorticity : 筛选显著涡旋的涡量阈值
+
+        返回:
+            vortices : list of dicts, 每个涡旋包含:
+                'center' : (x,y) 涡心坐标
+                'length' : 长轴长度（特征值λ1相关）
+                'width'  : 短轴长度（特征值λ2相关） 
+                'angle'  : 主轴角度（弧度）
+                'area'   : 涡旋近似面积
+        """
+        # 预处理：计算涡量场筛选候选区域
+        dy = yi[1,0] - yi[0,0]  # y方向网格间距
+        dx = xi[0,1] - xi[0,0]  # x方向网格间距
+        
+        # 计算速度梯度 (中心差分)
+        duy = np.gradient(u_rot, dy, axis=0)  # ∂u'/∂y
+        dvx = np.gradient(v_rot, dx, axis=1)          # ∂v/∂x
+        
+        # z方向涡量
+        vorticity = dvx - duy
+        mask = (np.abs(vorticity) > min_vorticity) & (alpha_i > self.alpha_threshold)
+        
+        # 连通区域标记（识别离散涡旋）
+        from scipy.ndimage import label
+        labeled, n_vortices = label(mask)
+        
+        vortices = []
+        for i in range(1, n_vortices + 1):
+            vortex_mask = (labeled == i)
+            
+            # 提取当前涡旋区域内的速度矢量
+            points = np.column_stack([xi[vortex_mask], yi[vortex_mask]])
+            velocities = np.column_stack([u_rot[vortex_mask], v_rot[vortex_mask]])
+            
+            # PCA分析
+            pca = PCA(n_components=2)
+            pca.fit(velocities - velocities.mean(axis=0))  # 去除平移运动
+            
+            # 计算几何参数
+            center = np.mean(points, axis=0)  # 涡心坐标
+            eigenvalues = pca.explained_variance_
+            eigenvectors = pca.components_
+            
+            # 长宽尺寸正比于特征值平方根（能量权重）
+            length = 2 * np.sqrt(eigenvalues[0])  # 长轴直径
+            width = 2 * np.sqrt(eigenvalues[1])   # 短轴直径
+            angle = np.arctan2(eigenvectors[0,1], eigenvectors[0,0])  # 主轴角度
+            
+            vortices.append({
+                'center': center,
+                'length': length,
+                'width': width,
+                'angle': angle,
+                'area': np.pi * (length/2) * (width/2)  # 椭圆面积近似
+            })
+        
+        return vortices
+    
+    def plot_vortex_boundaries(self, xi, yi, vortices, u_rot, v_rot,time_v):
+        """在速度场上叠加显示PCA测量的涡旋椭圆"""
+        plt.figure(figsize=self.FIG_SIZE)
+        
+        # 绘制背景速度场（此处示例用streamplot）
+        plt.streamplot(xi, yi, u_rot, v_rot, 
+                    color='k', density=2, linewidth=0.5)
+        
+        # 绘制每个涡旋的椭圆
+        from matplotlib.patches import Ellipse
+        for vortex in vortices:
+            ellipse = Ellipse(
+                xy=vortex['center'],
+                width=vortex['width'],
+                height=vortex['length'],
+                angle=np.degrees(vortex['angle']),
+                edgecolor='r',
+                facecolor='none',
+                lw=2,
+                linestyle='--'
+            )
+            plt.gca().add_patch(ellipse)
+            
+            # 标记中心点
+            plt.scatter(*vortex['center'], c='r', s=50, marker='x')
+        
+        plt.title(f'Vortex Boundaries (PCA) at t={time_v}s')
+        plt.xlim(self.X_LIM)
+        plt.savefig(os.path.join(self.output_dir, f'vortex_pca_dimensions_t{time_v}.png'))
+        plt.close()
+
+
+
 
     def process_time_step(self, time_v):
         """Process data for a single time step"""
@@ -771,7 +1040,7 @@ class TurbidityCurrentAnalyzer:
             alpha_vals = alpha
 
             # Calculate quantities
-            U, H_depth, y_crossing = self.integrate_quantities(ya, ua_x, alpha)
+            U, H, ALPHA, H_depth, y_crossing = self.integrate_quantities(ya, ua_x, alpha_vals)
             
             # Additional calculations for alpha crossing
             y_threshold = 0
@@ -863,12 +1132,36 @@ class TurbidityCurrentAnalyzer:
 
         # Define positions for vertical lines
         positions = {
-            '0.1H': head_x - 0.1*self.Height,
-            '0.25H': head_x - 0.25*self.Height,
-            '0.5H': head_x - 0.5*self.Height,
-            'H': head_x - self.Height
+            '$0.1H_0$': head_x - 0.1*self.Height,
+            '$0.25H_0$': head_x - 0.25*self.Height,
+            '$0.5H_0$': head_x - 0.5*self.Height,
+            '$H_0$': head_x - self.Height
         }
         y_text = 0.32
+
+
+                # 在process_time_step方法中（计算PCA前）
+        v_rot = interpolated['uyi']  # 旋转速度y分量
+        u_rot = interpolated['U_perturb']  # 旋转速度x分量
+
+        # 测量所有涡旋尺寸
+        vortex_properties = self.measure_vortex_dimensions(
+            xi, yi,u_rot, v_rot, 
+            interpolated['alpha_i'],
+            min_vorticity=0.5  # 根据实际情况调整阈值
+        )
+
+        # 打印结果
+        for i, vortex in enumerate(vortex_properties):
+            print(f"涡旋 #{i}:")
+            print(f"  中心位置: ({vortex['center'][0]:.3f}, {vortex['center'][1]:.3f}) m")
+            print(f"  长轴长度: {vortex['length']:.3f} m")
+            print(f"  短轴长度: {vortex['width']:.3f} m")
+            print(f"  主轴角度: {np.degrees(vortex['angle']):.1f}°\n")
+
+        # 可视化标记涡旋边界（可选）
+        self.plot_vortex_boundaries(xi, yi, vortex_properties, u_rot, v_rot,time_v)
+
    
                 #Add this after other plot calls in process_time_step
                 # 从 results DataFrame 提取 H 高度的坐标点
@@ -892,24 +1185,24 @@ class TurbidityCurrentAnalyzer:
     #   # Or use speed for colormap (see below)
     #     )
 
-    #     self.plot_velocity_vectors2(
-    #         xi, yi, interpolated['uxi'], interpolated['uyi'], interpolated['alpha_i'],
-    #         time_v, positions, y_text,
-    #         title=f'Velocity Field (t={time_v}s)',
-    #         filename=f'velocity_t{time_v}.png',
-    #         skip_x=6,          # Adjust density (higher = sparser)
-    #         skip_y=3,
-    #         scale = 3,
-    #         arrow_scale=1.0,
-    #         alpha_opacity=0.7,
-    #         alpha_cmap='gray_r',
-    #         velocity_zero_points=velocity_zero_points,  # 新增参数
-    #         h_points = h_points,  # H高度点
-    #         normalize_x=False,  # 是否进行无量纲化
-    #         head_x=head_x,    # 头部位置
-    #         H0=self.Height,   # 初始高度
-    #   # Or use speed for colormap (see below)
-    #     )
+        self.plot_velocity_vectors2(
+            xi, yi, interpolated['uxi'], interpolated['uyi'], interpolated['alpha_i'],
+            time_v, positions, y_text,
+            title=f'Velocity Field (t={time_v}s)',
+            filename=f'velocity_t{time_v}.png',
+            skip_x=6,          # Adjust density (higher = sparser)
+            skip_y=3,
+            scale = 3,
+            arrow_scale=1.0,
+            alpha_opacity=0.7,
+            alpha_cmap='gray_r',
+            velocity_zero_points=velocity_zero_points,  # 新增参数
+            h_points = h_points,  # H高度点
+            normalize_x=False,  # 是否进行无量纲化
+            head_x=head_x,    # 头部位置
+            H0=self.Height,   # 初始高度
+      # Or use speed for colormap (see below)
+        )
         
     #     self.plot_velocity_vectors3(
     #         xi, yi, interpolated['U_perturb'], interpolated['uyi'], interpolated['alpha_i'],
@@ -952,13 +1245,13 @@ class TurbidityCurrentAnalyzer:
         #     "Velocity Perturbation $U_aALPHA\'$ [m/s]", -0.2, 0.05
         # )
 
-        # self.plot_streamlines(
-        #     xi, yi, interpolated['uxi'], interpolated['uyi'], 
-        #     interpolated['uxi'], interpolated['alpha_i'], time_v, 
-        #     positions, y_text, f'Original Velocity Streamlines (t={time_v})',
-        #     f'origin_streamlines_t{time_v}.png', 
-        #     "Velocity $U_s$ [m/s]", -0.1, 0.1
-        # )
+        self.plot_streamlines2(
+            xi, yi, interpolated['uxi'], interpolated['uyi'], 
+            interpolated['uxi'], interpolated['alpha_i'], time_v, 
+            positions, y_text, f'Original Velocity Streamlines (t={time_v})',
+            f'origin_streamlines_t{time_v}.png', 
+            "Velocity $U_s$ [m/s]", -0.1, 0.1
+        )
 
         # self.plot_contour(
         #     xi, yi, interpolated['Uper_densitygradient'], interpolated['alpha_i'], 
@@ -974,13 +1267,13 @@ class TurbidityCurrentAnalyzer:
         #     levels=np.linspace(-0.5, 0.5, 21)
         # )
 
-        # self.plot_contour(
-        #     xi, yi, interpolated['omega_z'], interpolated['alpha_i'], 
-        #     time_v, positions, y_text, f'Vorticity (t={time_v})',
-        #     f'Vorticity_t{time_v}.png', '$\omega_z$ [1/s]',
-        #     levels=np.linspace(-10.5, 10.5, 81),
-        #     cmap='bwr'
-        # )
+        self.plot_contour(
+            xi, yi, interpolated['omega_z'], interpolated['alpha_i'], 
+            time_v, positions, y_text, fr'$\alpha_s$ (t={time_v})',
+            f'contour_t{time_v}.png', r'$\alpha_s$ ',
+            # levels=np.linspace(-10.5, 10.5, 81),
+            # cmap='bwr'
+        )
 
         # self.plot_contour(
         #     xi, yi, interpolated['Q_signed'], interpolated['alpha_i'], 
@@ -1015,7 +1308,7 @@ class TurbidityCurrentAnalyzer:
 
 
         # self.plot_contour(
-        #     xi, yi, interpolated['Uori_advection'], interpolated['alpha_i'], 
+        #     xi, yi, interpolated['uxi'], interpolated['alpha_i'], 
         #     time_v, positions, y_text, 
         #     f'Uori_advection (t={time_v})',
         #     f'Uori_advection_t{time_v}.png', 
@@ -1024,7 +1317,33 @@ class TurbidityCurrentAnalyzer:
         #     cmap='bwr'
         # )
 
+        self.plot_vorticity_contour(
+            xi, yi, 
+            interpolated['U_perturb'],         # 原始x方向速度
+            interpolated['uyi'],         # 原始y方向速度
+            interpolated['alpha_i'],     # 颗粒浓度
+            time_v,
+            positions, 
+            y_text,
+            title=f'Vorticity Field ($\hat u$ , t={time_v}s)',
+            filename=f'vorticity_rotation_t{time_v}.png',
+            levels=np.linspace(-5, 5, 41),  # 自定义色阶范围
+            cmap='bwr'                       # 红蓝配色
+        )
 
+        self.plot_vorticity_contour(
+            xi, yi, 
+            interpolated['uxi'],         # 原始x方向速度
+            interpolated['uyi'],         # 原始y方向速度
+            interpolated['alpha_i'],     # 颗粒浓度
+            time_v,
+            positions, 
+            y_text,
+            title=f'Vorticity Field (original u, t={time_v}s)',
+            filename=f'vorticity_t{time_v}.png',
+            levels=np.linspace(-5, 5, 41),  # 自定义色阶范围
+            cmap='bwr'                       # 红蓝配色
+        )
 
 
     def run_analysis(self):
