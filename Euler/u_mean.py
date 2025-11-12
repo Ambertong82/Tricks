@@ -12,17 +12,19 @@ from sklearn.decomposition import PCA
 class TurbidityCurrentAnalyzer:
     def __init__(self):
         # Configuration parameters
-        self.sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Middle_particle23/case230427_4"
+        # self.sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Middle_particle23/case230427_4"
+        self.sol = '/media/amber/53EA-E81F/PhD/case231020_5'
         # self.sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Fine_particle9/case090912_1"
-        self.output_dir = "/home/amber/postpro/u_umean_tc"
+        self.output_dir = "/home/amber/postpro/u_3d_finemiddle"
         self.alpha_threshold = 1e-5
         self.y_min = 0
-        self.times = [10]
+        self.times = [11]
         self.FIG_SIZE = (40, 6)
         self.X_LIM = (0.0, 1.6)
         self.Y_LIM = (0.0, 0.3)
         self.Height = 0.3
         self.colorset = 'fuchsia'
+        
         
         # Visualization parameters
         self.ALPHA_CONTOUR_PARAMS = {
@@ -91,14 +93,14 @@ class TurbidityCurrentAnalyzer:
         integral = np.trapz(ua_alpha[:max_ya_crossing_index], ya[:max_ya_crossing_index])
         integralU = np.trapz(ua_x[:max_ya_crossing_index], ya[:max_ya_crossing_index])
         integralU2 = np.trapz(ua_x[:max_ya_crossing_index]**2, ya[:max_ya_crossing_index])
-        integral2 = np.trapz((ua_x[:max_ya_crossing_index] * alpha_vals[:max_ya_crossing_index])**2, ya[:max_ya_crossing_index])
+        # integral2 = np.trapz((ua_x[:max_ya_crossing_index] * alpha_vals[:max_ya_crossing_index])**2, ya[:max_ya_crossing_index])
         
         U = integralU2 / integralU if integralU != 0 else 0
-        H = integral**2 / integral2 if integral2 != 0 else 0
+        # H = integral**2 / integral2 if integral2 != 0 else 0
         ALPHA = integral / integralU if integralU != 0 else 0
         H_depth = integralU**2 / integralU2 if integralU2 != 0 else 0
         
-        return U, H, ALPHA, H_depth, ya[max_ya_crossing_index]
+        return U, ALPHA, H_depth, ya[max_ya_crossing_index]
 
     def calculate_perturbation_fields(self, X, Y, Ua_A, x_coords, x_U_mapping, x_U_mapping_alpha, gradbeta_x, omega_z, gradvorticity_x, beta):
         """Calculate perturbation velocity and advection fields"""
@@ -232,7 +234,7 @@ class TurbidityCurrentAnalyzer:
             xi, yi, alpha_i,
             levels=np.linspace(0, 0.015, 128),                   # 颜色分级数
             cmap='gray_r',              # 云图颜色映射
-            alpha=0.7,          # 透明度
+            alpha=0.7,                  # 透明度
             antialiased=True,             # 抗锯齿
             zorder=1
             
@@ -1021,11 +1023,11 @@ class TurbidityCurrentAnalyzer:
             return
 
         # Process each x coordinate
-        results = []
+   
         x_coords = np.unique(X[(X <= head_x) & (X >= 0)])
-        
+        x_data = {}
         for xx in x_coords:
-            mask = (X == xx)  & (Y >= 0) & (alpha_A > 1e-5)
+            mask = (X == xx)  & (Y >= 0) #& (alpha_A > 1e-5)
             if not np.any(mask):
                 continue
             
@@ -1040,50 +1042,75 @@ class TurbidityCurrentAnalyzer:
             alpha_vals = alpha
 
             # Calculate quantities
-            U, H, ALPHA, H_depth, y_crossing = self.integrate_quantities(ya, ua_x, alpha_vals)
+            U,  ALPHA, H_depth, y_crossing = self.integrate_quantities(ya, ua_x, alpha_vals)
+            rhomix  = (ALPHA * 3217 + (1 - ALPHA) * 1000-1000)/1000  # 密度混合物characteristic density
+            x_data[xx] = {
+            'U': U, 'H_depth': H_depth, 'y_crossing': y_crossing,
+            'ya': ya, 'ua': ua, 'alpha': alpha, 'rhomix_mean': rhomix
+        }
             
-            # Additional calculations for alpha crossing
-            y_threshold = 0
-            valid_mask = ya > y_threshold
-            if np.any(valid_mask):
-                below_threshold = (alpha_vals[valid_mask] < 1e-5)
-                if np.any(below_threshold):
-                    first_below_rel_index = np.argmax(below_threshold)
-                    valid_indices = np.where(valid_mask)[0]
-                    max_ya_crossing_index_alpha = valid_indices[first_below_rel_index]
-                    y_crossing_alpha = ya[max_ya_crossing_index_alpha]
-                    u_crossing_alpha = ua_x[max_ya_crossing_index_alpha]
-                else:
-                    max_ya_crossing_index_alpha = np.where(valid_mask)[0][-1]
-                    y_crossing_alpha = ya[max_ya_crossing_index_alpha]
-                    u_crossing_alpha = ua_x[max_ya_crossing_index_alpha]
+        # 3. 计算全域dU/dx（在循环外部统一计算）
+        if len(x_data) > 1:
+            x_sorted = np.sort(list(x_data.keys()))
+            U_all = np.array([x_data[x]['U'] for x in x_sorted])
+            dx = x_sorted[1] - x_sorted[0]  # 假设均匀网格
+            dUdx_all = np.gradient(U_all, dx)
+            
+            # 创建dU/dx的映射字典
+            dUdx_map = dict(zip(x_sorted, dUdx_all))
+        else:
+            dUdx_map = {list(x_data.keys())[0]: 0}
+
+
+        # 4. 计算每个剖面的Sc值（每个x位置单个Sc值）
+        for xx, data in x_data.items():
+            dUdx = dUdx_map[xx]
+            
+            # 每个剖面得到一个Sc值（基于平均密度）
+            if data['U'] != 0:
+                data['S_sc'] = data['rhomix_mean'] * data['H_depth'] * dUdx / data['U']
             else:
-                max_ya_crossing_index_alpha = len(ya) - 1
-                y_crossing_alpha = ya[max_ya_crossing_index_alpha]
-                u_crossing_alpha = ua_x[max_ya_crossing_index_alpha]
-
-            # Additional integrations for alpha crossing
-            ua_alpha_alpha = ua_x * alpha_vals
-            integral_alpha = np.trapz(ua_alpha_alpha[:max_ya_crossing_index_alpha], ya[:max_ya_crossing_index_alpha])
-            integralU_alpha = np.trapz(ua_x[:max_ya_crossing_index_alpha], ya[:max_ya_crossing_index_alpha])
-            integralU2_alpha = np.trapz(ua_x[:max_ya_crossing_index_alpha]**2, ya[:max_ya_crossing_index_alpha])
-            integral2_alpha = np.trapz((ua_x[:max_ya_crossing_index_alpha] * alpha_vals[:max_ya_crossing_index_alpha])**2, ya[:max_ya_crossing_index_alpha])
+                data['S_sc'] = 0    
             
-            U_alpha = integralU2_alpha / integralU_alpha if integralU_alpha != 0 else 0
-            H_alpha = integral_alpha**2 / integral2_alpha if integral2_alpha != 0 else 0
-            ALPHA_alpha = integral_alpha / integralU_alpha if integralU_alpha != 0 else 0
+        # 5. 提取目标位置的Sc值
+        results = []
+        target_positions = [
+            ('1/4', head_x - 0.25 * 0.3),
+            ('1/3', head_x - 1/3 * 0.3), 
+            ('1/2', head_x - 0.5 * 0.3),
+            ('1', head_x - 1.0 * 0.3)
+        ]
+        
+        for xx in x_coords:
+            if xx not in x_data:
+                continue
+                
+            data = x_data[xx]
+            
+            # 提取目标位置的Sc值
+            target_sc_values = {}
+            for label, target_x in target_positions:
+                # 找到最接近目标x的网格点
+                closest_x = min(x_coords, key=lambda x: abs(x - target_x))
+                
+                # 直接获取该位置的Sc值
+                if closest_x in x_data:
+                    target_sc_values[f'S_sc_{label}'] = x_data[closest_x]['S_sc']
+                else:
+                    target_sc_values[f'S_sc_{label}'] = np.nan
 
-            results.append({
+          
+            # 保存结果（每个x位置一条记录）
+            result = {
                 "Time": time_v,
                 "x": xx,
-                "U": U,
-                "H": H_depth,
-                "y_crossing": y_crossing,
-                "U_alpha": U_alpha,
-                "H_alpha": H_alpha,
-                "ALPHA_alpha": ALPHA_alpha,
-                "y_crossing_alpha": y_crossing_alpha
-            })
+                "U": data['U'], 
+                "H": data['H_depth'],
+                "y_crossing": data['y_crossing'],
+                "S_sc_local": data['S_sc'],  # 当前x位置的Sc值
+                **target_sc_values
+            }
+            results.append(result)
             # 存储速度零点的 (x, y)
             velocity_zero_points.append((xx, y_crossing))
             h_points.append((xx, H_depth))
@@ -1096,7 +1123,7 @@ class TurbidityCurrentAnalyzer:
 
         # Calculate perturbation fields
         x_U_mapping = dict(zip(df['x'], df['U']))
-        x_U_mapping_alpha = dict(zip(df['x'], df['U_alpha']))
+        x_U_mapping_alpha = dict(zip(df['x'], df['U']))
         
         fields = self.calculate_perturbation_fields(
             X, Y, Ua_A, x_coords, x_U_mapping, x_U_mapping_alpha, gradbeta_x, omega_z, gradvorticity_x, beta

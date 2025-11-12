@@ -24,11 +24,13 @@ class TurbidityCurrentAnalyzer:
         # Configuration parameters
         # self.sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Middle_particle23/case230427_4"
         # self.sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Fine_particle9/case090912_1"
-        self.sol = '/media/amber/53EA-E81F/PhD/case231020_5'
-        self.output_dir = "/home/amber/postpro/u_umean_tc3dside"
+        # self.sol = '/media/amber/53EA-E81F/PhD/case231020_5'
+        self.sol = '/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Fine_particle9/case091020_5'
+
+        self.output_dir = "/home/amber/postpro/u_umean_fine_tc3dmiddle"
         self.alpha_threshold = 1e-5
         self.y_min = 0
-        self.times = [9]
+        self.times = [5,7,9,11]
         self.FIG_SIZE = (40, 6)
         self.X_LIM = (0.0, 2.0)
         self.Y_LIM = (0.0, 0.3)
@@ -903,24 +905,7 @@ class TurbidityCurrentAnalyzer:
 
     def measure_vortex_dimensions_lambda2(self, xi, yi, ux, uy, alpha_i, time_v):
         """
-        基于Lambda2准则量化涡旋特征
-        
-        参数:
-            ux, uy : 速度场分量 (2D数组)
-            xi, yi : 网格坐标 (2D数组)
-            alpha_i: 颗粒浓度场
-            time_v : 当前时间步
-            
-        返回:
-            vortices : list of dicts, 每个涡旋包含:
-                'id'       : 涡旋ID
-                'center'   : (x,y) 涡心坐标
-                'length'   : 长轴长度
-                'width'    : 短轴长度
-                'angle'    : 主轴角度(度数)
-                'area'     : 椭圆面积
-                'max_lambda2': 最大Lambda2值
-                'major_axis': 主轴方向向量
+        基于Lambda2准则量化涡旋特征（按x坐标排序）
         """
         # 1. 计算Lambda2场
         lambda2, _ = self.calculate_lambda2_criterion(ux, uy, xi, yi, lambda2_threshold=0)
@@ -939,40 +924,75 @@ class TurbidityCurrentAnalyzer:
         labeled, n_vortices = label(final_mask)
         print(f"通过Lambda2准则识别出 {n_vortices} 个涡结构")
         
-        # 6. 逐个分析涡旋
-        vortex_list = []
+        # 6. 按x坐标重新排序涡旋ID
+        vortex_data = []  # 存储(旧ID, 中心x坐标, PCA属性)
+        
+        # 先收集所有涡旋的数据
         for i in range(1, n_vortices + 1):
             vortex_mask = (labeled == i)
             points = np.column_stack([xi[vortex_mask], yi[vortex_mask]])
             
-            # ---------- PCA分析几何形状 ----------
             try:
                 pca = ManualPCA()
                 pca.fit(points)
                 props = pca.get_vortex_properties()
+                center_x = props['center'][0]  # 获取x坐标
+                area = np.pi * (props['length']/2) * (props['width']/2)
+                if area > 1e-4:  # 面积过滤条件
+                    
+                    vortex_data.append({
+                    'old_id': i,
+                    'center_x': center_x,
+                    'props': props,
+                    'vortex_mask': vortex_mask
+                })
+                else:
+                    print(f"涡旋 原ID{i} 面积过小 ({area:.6f})，已过滤")
                 
-                # 计算区域内最大Lambda2值
-                max_lambda2 = np.min(lambda2[vortex_mask])  # Lambda2是负值，取最小即绝对值最大
-                
-                vortex_list.append({
-                    'id': i,
+            except Exception as e:
+                print(f"涡旋 {i} PCA分析失败：{e}")
+                continue
+        
+        # 按x坐标从小到大排序
+        vortex_data.sort(key=lambda x: x['center_x'], reverse=True)
+        
+        print(f"重新排序后：{[(idx+1, data['old_id'], data['center_x']) for idx, data in enumerate(vortex_data)]}")
+        
+        # 7. 使用新ID构建最终的涡旋列表
+        vortex_list = []
+        for idx, data in enumerate(vortex_data):
+            new_id = idx + 1
+            old_id = data['old_id']
+            props = data['props']
+            vortex_mask = data['vortex_mask']
+            
+            # 计算区域内最大Lambda2值
+            max_lambda2 = np.min(lambda2[vortex_mask])  # Lambda2是负值，取最小即绝对值最大
+            area = np.pi * (props['length']/2) * (props['width']/2)
+            
+            # 面积判断和过滤逻辑
+            
+            vortex_list.append({
+                    'id': new_id,  # 使用新的排序ID
                     'time': time_v,
                     'center': props['center'],
                     'length': props['length'],
                     'width': props['width'],
                     'angle': np.degrees(props['angle']),
-                    'area': np.pi * (props['length']/2) * (props['width']/2),
+                    'area': area,
                     'max_lambda2': max_lambda2,
-                    'major_axis': props['major_axis']
+                    'major_axis': props['major_axis'],
+                    'original_id': old_id  # 可选：保留原始ID用于调试
                 })
-            except Exception as e:
-                print(f"涡旋 {i} PCA分析失败：{e}")
+            
         
         # 保存数据
         if vortex_list:
             self.save_vortex_data_lambda2(vortex_list)
         
         return vortex_list
+
+
 
     def save_vortex_data_lambda2(self, vortex_list):
         """保存Lambda2涡旋数据到CSV"""
@@ -1008,6 +1028,24 @@ class TurbidityCurrentAnalyzer:
         可视化Lambda2识别的涡旋边界
         """
         plt.figure(figsize=self.FIG_SIZE)
+        # 1. Plot alpha concentration cloud map (background)
+        cf = plt.contourf(
+            xi, yi, alpha_i,
+            levels=np.linspace(0, 0.015, 128),                   # 颜色分级数
+            cmap='gray_r',              # 云图颜色映射
+            alpha=0.75,          # 透明度
+            antialiased=True,             # 抗锯齿
+            zorder=1
+            
+        )
+        # === 添加精细网格 ===
+        # 设置网格线的密度
+        x_ticks = np.arange(self.X_LIM[0], self.X_LIM[1] + 0.1, 0.1)  # 每0.1m一条竖线
+        y_ticks = np.arange(self.Y_LIM[0], self.Y_LIM[1] + 0.05, 0.05)  # 每0.05m一条横线
+        
+        plt.xticks(x_ticks)
+        plt.yticks(y_ticks)
+        plt.grid(True, alpha=1, linestyle='-', linewidth=0.5, color='lightgray')
         
         # 1. 背景流线
         mask = alpha_i > 1e-5
@@ -1071,7 +1109,7 @@ class TurbidityCurrentAnalyzer:
     def process_time_step(self, X,Y,Z,time_v):
         """Process data for a single time step"""
 
-        select = (Z == 0.065)
+        select = (Z == 0.135)
 
         # Read field data
         Ua_A = fluidfoam.readvector(self.sol, str(time_v), "U.a")
@@ -1225,8 +1263,9 @@ class TurbidityCurrentAnalyzer:
 
         # Define positions for vertical lines
         positions = {
-            '$0.1H_0$': head_x - 0.1*self.Height,
+            
             '$0.25H_0$': head_x - 0.25*self.Height,
+            '$0.3H_0$': head_x - 0.33*self.Height,
             '$0.5H_0$': head_x - 0.5*self.Height,
             '$H_0$': head_x - self.Height
         }
@@ -1303,19 +1342,19 @@ class TurbidityCurrentAnalyzer:
             y_text
         )
 
-        self.plot_Q_contour(
-            xi, yi,vortex_properties,
-            interpolated['U_perturb'],         # 原始x方向速度
-            interpolated['uyi'],         # 原始y方向速度
-            interpolated['alpha_i'],     # 颗粒浓度
-            time_v,
-            positions,
-            y_text,
-            title=f'Q-Criterion Contours (t={time_v}s)',
-            filename=f'Q_contours_t{time_v}.png',
-            levels=np.linspace(-5, 5, 21),
-            cmap='bwr'
-        )
+        # self.plot_Q_contour(
+        #     xi, yi,vortex_properties,
+        #     interpolated['U_perturb'],         # 原始x方向速度
+        #     interpolated['uyi'],         # 原始y方向速度
+        #     interpolated['alpha_i'],     # 颗粒浓度
+        #     time_v,
+        #     positions,
+        #     y_text,
+        #     title=f'Q-Criterion Contours (t={time_v}s)',
+        #     filename=f'Q_contours_t{time_v}.png',
+        #     levels=np.linspace(-5, 5, 21),
+        #     cmap='bwr'
+        # )
 
 
 
@@ -1329,6 +1368,13 @@ class TurbidityCurrentAnalyzer:
             f'Rotation_streamlines_t{time_v}s.png', 
             "$\hat{U}_s$ [m/s]", -0.3, 0.07
         )
+        self.plot_streamlines(
+            xi, yi, interpolated['uxi'], interpolated['uyi'], 
+            interpolated['uxi'], interpolated['alpha_i'], time_v, 
+            positions, y_text, f'Original Velocity Streamlines (t={time_v})',
+            f'Original_streamlines_t{time_v}s.png', 
+             "${U}_s$ [m/s]", -0.3, 0.07
+        )    
 
 
 
