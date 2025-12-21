@@ -15,10 +15,12 @@ class TurbidityCurrentAnalyzer:
         # self.sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Middle_particle23/case230427_4"
         self.sol = '/media/amber/53EA-E81F/PhD/case231020_5'
         # self.sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Fine_particle9/case090912_1"
-        self.output_dir = "/home/amber/postpro/u_3d_finemiddle"
+        # self.output_dir = "/home/amber/postpro/u_3d_finemiddle"
+        # self.sol = '/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Fine_particle9/3d/case091020_5'
+        self.output_dir = "/home/amber/postpro/u_umean/tc3d_d23"
         self.alpha_threshold = 1e-5
         self.y_min = 0
-        self.times = [11]
+        self.times = [5]
         self.FIG_SIZE = (40, 6)
         self.X_LIM = (0.0, 1.6)
         self.Y_LIM = (0.0, 0.3)
@@ -987,8 +989,11 @@ class TurbidityCurrentAnalyzer:
 
 
 
-    def process_time_step(self, time_v):
+    def process_time_step(self, X,Y,Z,time_v):
         """Process data for a single time step"""
+        # Read field data
+        select = (Z == 0.135)
+
         # Read field data
         Ua_A = fluidfoam.readvector(self.sol, str(time_v), "U.a")
         alpha_A = fluidfoam.readscalar(self.sol, str(time_v), "alpha.a")
@@ -998,6 +1003,16 @@ class TurbidityCurrentAnalyzer:
         gradbeta = fluidfoam.readvector(self.sol, str(time_v), "grad(alpha.b)")
         gradvorticity = fluidfoam.readtensor(self.sol, str(time_v), "grad(vorticity)")
 
+        # selecting slice at Z = xxx
+        X = X[select]
+        Y = Y[select]
+        alpha_A = alpha_A[select]
+        Ua_A = Ua_A[:,select]
+        beta = beta[select]
+        gradU = gradU[:,select]
+        vorticity = vorticity[:,select]
+        gradbeta = gradbeta[:,select]
+        gradvorticity = gradvorticity[:,select]
         # Extract components
         gradU_x = gradU[0]
         gradU_y = gradU[3]
@@ -1011,8 +1026,8 @@ class TurbidityCurrentAnalyzer:
         velocity_zero_points = []
         h_points = []
 
+
         # Locate head position
-        X, Y, Z = fluidfoam.readmesh(self.sol)
         head_x = None
         for x in np.unique(X):
             mask = (X == x) & (Y >= self.y_min) & (alpha_A > self.alpha_threshold)
@@ -1027,7 +1042,7 @@ class TurbidityCurrentAnalyzer:
         x_coords = np.unique(X[(X <= head_x) & (X >= 0)])
         x_data = {}
         for xx in x_coords:
-            mask = (X == xx)  & (Y >= 0) #& (alpha_A > 1e-5)
+            mask = (X == xx)  & (Y >= 0) 
             if not np.any(mask):
                 continue
             
@@ -1159,9 +1174,9 @@ class TurbidityCurrentAnalyzer:
 
         # Define positions for vertical lines
         positions = {
-            '$0.1H_0$': head_x - 0.1*self.Height,
-            '$0.25H_0$': head_x - 0.25*self.Height,
-            '$0.5H_0$': head_x - 0.5*self.Height,
+            '$1/4H_0$': head_x - 0.25*self.Height,
+            '$1/3H_0$': head_x - 0.33*self.Height,
+            '$1/2H_0$': head_x - 0.5*self.Height,
             '$H_0$': head_x - self.Height
         }
         y_text = 0.32
@@ -1171,23 +1186,23 @@ class TurbidityCurrentAnalyzer:
         v_rot = interpolated['uyi']  # 旋转速度y分量
         u_rot = interpolated['U_perturb']  # 旋转速度x分量
 
-        # 测量所有涡旋尺寸
-        vortex_properties = self.measure_vortex_dimensions(
-            xi, yi,u_rot, v_rot, 
-            interpolated['alpha_i'],
-            min_vorticity=0.5  # 根据实际情况调整阈值
-        )
+        # # 测量所有涡旋尺寸
+        # vortex_properties = self.measure_vortex_dimensions(
+        #     xi, yi,u_rot, v_rot, 
+        #     interpolated['alpha_i'],
+        #     min_vorticity=0.5  # 根据实际情况调整阈值
+        # )
 
-        # 打印结果
-        for i, vortex in enumerate(vortex_properties):
-            print(f"涡旋 #{i}:")
-            print(f"  中心位置: ({vortex['center'][0]:.3f}, {vortex['center'][1]:.3f}) m")
-            print(f"  长轴长度: {vortex['length']:.3f} m")
-            print(f"  短轴长度: {vortex['width']:.3f} m")
-            print(f"  主轴角度: {np.degrees(vortex['angle']):.1f}°\n")
+        # # 打印结果
+        # for i, vortex in enumerate(vortex_properties):
+        #     print(f"涡旋 #{i}:")
+        #     print(f"  中心位置: ({vortex['center'][0]:.3f}, {vortex['center'][1]:.3f}) m")
+        #     print(f"  长轴长度: {vortex['length']:.3f} m")
+        #     print(f"  短轴长度: {vortex['width']:.3f} m")
+        #     print(f"  主轴角度: {np.degrees(vortex['angle']):.1f}°\n")
 
-        # 可视化标记涡旋边界（可选）
-        self.plot_vortex_boundaries(xi, yi, vortex_properties, u_rot, v_rot,time_v)
+        # # 可视化标记涡旋边界（可选）
+        # self.plot_vortex_boundaries(xi, yi, vortex_properties, u_rot, v_rot,time_v)
 
    
                 #Add this after other plot calls in process_time_step
@@ -1259,9 +1274,9 @@ class TurbidityCurrentAnalyzer:
         self.plot_streamlines(
             xi, yi, interpolated['U_perturb'], interpolated['uyi'], 
             interpolated['U_perturb'], interpolated['alpha_i'], time_v, 
-            positions, y_text, f'Rotation Velocity Streamlines (t={time_v})',
+            positions, y_text, f'Rotation Velocity Streamlines $u_r$ [m/s] (t={time_v}s)',
             f'Rotation_streamlines_t{time_v}s.png', 
-            "$\hat{U}_s$ [m/s]", -0.3, 0.07
+            "$u_r$ [m/s]", -0.3, 0.07
         )
 
         # self.plot_streamlines(
@@ -1275,9 +1290,9 @@ class TurbidityCurrentAnalyzer:
         self.plot_streamlines2(
             xi, yi, interpolated['uxi'], interpolated['uyi'], 
             interpolated['uxi'], interpolated['alpha_i'], time_v, 
-            positions, y_text, f'Original Velocity Streamlines (t={time_v})',
+            positions, y_text, f'Original Velocity Streamlines $u_s$ [m/s] (t={time_v}s)',
             f'origin_streamlines_t{time_v}.png', 
-            "Velocity $U_s$ [m/s]", -0.1, 0.1
+            "Velocity $u_s$ [m/s]", -0.1, 0.1
         )
 
         # self.plot_contour(
@@ -1296,7 +1311,7 @@ class TurbidityCurrentAnalyzer:
 
         self.plot_contour(
             xi, yi, interpolated['omega_z'], interpolated['alpha_i'], 
-            time_v, positions, y_text, fr'$\alpha_s$ (t={time_v})',
+            time_v, positions, y_text, fr'$\alpha_s$ (t={time_v}s)',
             f'contour_t{time_v}.png', r'$\alpha_s$ ',
             # levels=np.linspace(-10.5, 10.5, 81),
             # cmap='bwr'
@@ -1352,7 +1367,7 @@ class TurbidityCurrentAnalyzer:
             time_v,
             positions, 
             y_text,
-            title=f'Vorticity Field ($\hat u$ , t={time_v}s)',
+            title=f'Vorticity Field ($\omega_{{rz}}$ , t={time_v}s)',
             filename=f'vorticity_rotation_t{time_v}.png',
             levels=np.linspace(-5, 5, 41),  # 自定义色阶范围
             cmap='bwr'                       # 红蓝配色
@@ -1376,10 +1391,10 @@ class TurbidityCurrentAnalyzer:
     def run_analysis(self):
         """Main method to run the analysis for all time steps"""
         os.makedirs(self.output_dir, exist_ok=True)
-        
+        X, Y, Z = fluidfoam.readmesh(self.sol)
         for time_v in self.times:
             print(f"Processing time step: {time_v}")
-            self.process_time_step(time_v)
+            self.process_time_step(X,Y,Z,time_v)
         
         print(f"All results saved to: {self.output_dir}")
 

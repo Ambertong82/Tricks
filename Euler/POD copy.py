@@ -22,17 +22,17 @@ class TurbidityCurrentAnalyzer:
         self.plot_prefix = f"plot_{self.timestamp}_"  # 用于图像文件名
         # self.output_prefix = output_prefix if output_prefix else "default_prefix"
         # Configuration parameters
-        self.sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Middle_particle23/case230427_4"
-        # self.sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Fine_particle9/case090912_1"
+        # self.sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Middle_particle23/case230427_4"
+        self.sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Fine_particle9/case090912_1"
         # self.sol = '/media/amber/53EA-E81F/PhD/case231020_5'
         # self.sol = '/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Fine_particle9/case091020_5'
 
-        self.output_dir = "/home/amber/postpro/u_umean_tc2dcoarse"
+        self.output_dir = "/home/amber/postpro/u_umean_tc2d"
         self.alpha_threshold = 1e-5
         self.y_min = 0
-        self.times = [5,7,9,11]
+        self.times = [7,10,12]
         self.FIG_SIZE = (40, 6)
-        self.X_LIM = (0.0, 2.0)
+        self.X_LIM = (0.0, 1.6)
         self.Y_LIM = (0.0, 0.3)
         self.Height = 0.3
         self.colorset = 'fuchsia'
@@ -203,6 +203,7 @@ class TurbidityCurrentAnalyzer:
         """Interpolate fields to regular grid"""
         return {name: griddata((X, Y), field, (xi, yi), method='linear') 
                 for name, field in fields.items()}
+    
 
     def plot_streamlines(self, xi, yi, ux, uy, color_field, alpha_i, time_v, positions, y_text, 
                         title, filename, color_label, vmin=None, vmax=None):
@@ -1239,7 +1240,7 @@ class TurbidityCurrentAnalyzer:
 
         # Interpolate fields
         xi = np.linspace(X.min(), X.max(), 750)#1000
-        yi = np.linspace(Y.min(), Y.max(), 200)
+        yi = np.linspace(Y.min(), Y.max(), 100)
         xi, yi = np.meshgrid(xi, yi)
         
         interpolated = self.interpolate_fields(
@@ -1264,8 +1265,8 @@ class TurbidityCurrentAnalyzer:
         # Define positions for vertical lines
         positions = {
             
+            '$0.1H_0$': head_x - 0.1*self.Height,
             '$0.25H_0$': head_x - 0.25*self.Height,
-            '$0.3H_0$': head_x - 0.33*self.Height,
             '$0.5H_0$': head_x - 0.5*self.Height,
             '$H_0$': head_x - self.Height
         }

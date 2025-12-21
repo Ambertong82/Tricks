@@ -25,14 +25,14 @@ class TurbidityCurrentAnalyzer:
         # self.sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Middle_particle23/case230427_4"
         # self.sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Fine_particle9/case090912_1"
         # self.sol = '/media/amber/53EA-E81F/PhD/case231020_5'
-        self.sol = '/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Fine_particle9/case091020_5'
+        self.sol = '/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Fine_particle9/3d/case091020_5'
 
-        self.output_dir = "/home/amber/postpro/u_umean_fine_tc3dmiddle"
+        self.output_dir = "/home/amber/postpro/POD/u_umean_fine_tc3dmiddle"
         self.alpha_threshold = 1e-5
         self.y_min = 0
-        self.times = [5,7,9,11]
+        self.times = [5]
         self.FIG_SIZE = (40, 6)
-        self.X_LIM = (0.0, 2.0)
+        self.X_LIM = (0.0, 1.6)
         self.Y_LIM = (0.0, 0.3)
         self.Height = 0.3
         self.colorset = 'fuchsia'
@@ -440,27 +440,17 @@ class TurbidityCurrentAnalyzer:
         # plt.contour(xi, yi, alpha_i, **self.ALPHA_CONTOUR_PARAMS2)
         # 4. 添加参考线/标签
         for label, x_pos in positions.items():
-            plt.axvline(x=x_pos, color=self.colorset, linestyle='dashdot', 
-                       linewidth=1, zorder=3)
-            plt.text(x_pos + 0.005, y_text, f'{label}', 
-                    fontsize=20, zorder=3, color=self.colorset)
+            plt.axvline(x=x_pos, color=self.colorset, linestyle='dashdot', linewidth=1, zorder=3)
+            plt.text(x_pos + 0.005, y_text, f'{label}', fontsize=20, zorder=3, color=self.colorset)
         
-        # 5. 添加颜色条和其他装饰
-        # cbar = plt.colorbar(contour, label='Vorticity $\omega_z$ [1/s]', 
-        #                    orientation='horizontal', shrink=0.3,pad = 0.2)
+        plt.gca().set_aspect('auto')
         plt.xlabel('x [m]')
         plt.ylabel('y [m]')
         plt.xlim(*self.X_LIM)
         plt.ylim(*self.Y_LIM)
         plt.title(title)
-        
-        # 6. 保存图像
-        plt.savefig(os.path.join(self.output_dir, filename), 
-                   dpi=300, bbox_inches='tight')
-        plt.close()    
-
-
-
+        plt.savefig(os.path.join(self.output_dir, filename), dpi=300, bbox_inches='tight')
+        plt.close()
 
     def plot_velocity_vectors(
             self, xi, yi, ux, uy, alpha_i, time_v, positions, y_text,
@@ -667,7 +657,10 @@ class TurbidityCurrentAnalyzer:
             # --- FIX ENDS HERE ---
         
         # 保存数据
-        if vortex_list:  # 仅当有数据时保存
+        if vortex_list:
+            vortex_list.sort(key=lambda v: v["area"], reverse=True)
+            for new_id, vortex in enumerate(vortex_list, start=1):
+                vortex["id"] = new_id  # 仅当有数据时保存
             self.save_vortex_data(vortex_list)
         
         return vortex_list
@@ -683,8 +676,7 @@ class TurbidityCurrentAnalyzer:
             data_to_save.append({
                 'id': vortex['id'],
                 'time': vortex['time'],
-                'x_center': vortex['center'][0],
-                'y_center': vortex['center'][1],
+                "center": list(vortex["center"]),
                 'length': vortex['length'],
                 'width': vortex['width'],
                 'geo_angle_deg': vortex['geo_angle_deg'],
@@ -708,7 +700,15 @@ class TurbidityCurrentAnalyzer:
     def plot_vortex_boundaries(self, xi, yi, vortices, u_rot, v_rot, time_v, alpha_i,positions,y_text):
         """在速度场上叠加显示PCA测量的涡旋椭圆（改进版）"""
         plt.figure(figsize=self.FIG_SIZE)
-
+# 设置网格线的密度
+        x_ticks = np.arange(self.X_LIM[0], self.X_LIM[1] + 0.1, 0.1)  # 每0.1m一条竖线
+        y_ticks = np.arange(self.Y_LIM[0], self.Y_LIM[1] + 0.05, 0.05)  # 每0.05m一条横线
+        
+        plt.xticks(x_ticks)
+        plt.yticks(y_ticks)
+        plt.grid(True, alpha=1, linestyle='-', linewidth=0.5, color='lightgray')
+        
+        
         # 1. Plot alpha concentration cloud map (background)
         cf = plt.contourf(
             xi, yi, alpha_i,
@@ -988,6 +988,9 @@ class TurbidityCurrentAnalyzer:
         
         # 保存数据
         if vortex_list:
+            vortex_list.sort(key=lambda v: v["area"], reverse=True)
+            for new_id, vortex in enumerate(vortex_list, start=1):
+                vortex["id"] = new_id
             self.save_vortex_data_lambda2(vortex_list)
         
         return vortex_list

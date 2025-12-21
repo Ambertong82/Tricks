@@ -6,7 +6,7 @@ from fractions import Fraction
 ### this code is used to extract the data at specific x location (head-0.3) at every time step #####
 
 # 常量定义
-A = 1/4  # 修改这里即可自动更新文件名（支持分数/浮点数）
+A = 1/1  # 修改这里即可自动更新文件名（支持分数/浮点数）
 y_min = 0
 alpha_threshold = 1e-5
 
@@ -22,49 +22,49 @@ def get_output_files():
         'yy': f'x{a_id}xyy.csv',
         'ua': f'x{a_id}xua.csv',
         'ub': f'x{a_id}xub.csv',
-        'Rig': f'x{a_id}xRig.csv',
-        'Rigg': f'x{a_id}xRigg.csv',
-        'omegaz': f'x{a_id}xomegaz.csv',
-        'reynolds12': f'x{a_id}xReynolds.csv',
-        'reynolds11': f'x{a_id}xReynolds11.csv',
-        'reynolds22': f'x{a_id}xReynolds22.csv',
+        # 'Rig': f'x{a_id}xRig.csv',
+        # 'Rigg': f'x{a_id}xRigg.csv',
+        # 'omegaz': f'x{a_id}xomegaz.csv',
+        # 'reynolds12': f'x{a_id}xReynolds.csv',
+        # 'reynolds11': f'x{a_id}xReynolds11.csv',
+        # 'reynolds22': f'x{a_id}xReynolds22.csv',
         'yplus': f'x{a_id}xYPLUS.csv',
-        'alpha': f'x{a_id}xALPHA.csv',
-        'uadimless': f'x{a_id}xuadimless.csv',
-        'ubdimless': f'x{a_id}xubdimless.csv',
-        'shearstress': f'x{a_id}xShearStress.csv',
-        'kinetic_energy': f'x{a_id}xKineticEnergy.csv',
-        'production': f'x{a_id}xProduction.csv',
-        'production_xy': f'x{a_id}xProduction_xy.csv',
-        'production_dudx': f'x{a_id}xProduction_dudx.csv',
-        'production_dvdy': f'x{a_id}xProduction_dvdy.csv',
+        # 'alpha': f'x{a_id}xALPHA.csv',
+        # 'uadimless': f'x{a_id}xuadimless.csv',
+        # 'ubdimless': f'x{a_id}xubdimless.csv',
+        # 'shearstress': f'x{a_id}xShearStress.csv',
+        # 'kinetic_energy': f'x{a_id}xKineticEnergy.csv',
+        # 'production': f'x{a_id}xProduction.csv',
+        # 'production_xy': f'x{a_id}xProduction_xy.csv',
+        # 'production_dudx': f'x{a_id}xProduction_dudx.csv',
+        # 'production_dvdy': f'x{a_id}xProduction_dvdy.csv',
         # 'grad_dudx': f'x{a_id}xGrad_dudx.csv',
         # 'grad_dvdy': f'x{a_id}xGrad_dvdy.csv',
         # 'dragpart': f'x{a_id}xDragPart.csv',
-        'buoyancy': f'x{a_id}xBuoyancy.csv',
-        'dissipation': f'x{a_id}xDissipation.csv',
-        'uay': f'x{a_id}xuay.csv',
-        'uby': f'x{a_id}xuby.csv',
-        'ke_dimless': f'x{a_id}xke_dimless.csv',
+        # 'buoyancy': f'x{a_id}xBuoyancy.csv',
+        # 'dissipation': f'x{a_id}xDissipation.csv',
+        # 'uay': f'x{a_id}xuay.csv',
+        # 'uby': f'x{a_id}xuby.csv',
+        # 'ke_dimless': f'x{a_id}xke_dimless.csv',
         'H': f'x{a_id}xH.csv',
         'U': f'x{a_id}xU.csv',
         'ALPHA': f'x{a_id}xALPHA.csv',
         'H_depth': f'x{a_id}xH_depth.csv',
-        'H_alpha': f'x{a_id}xH_alpha.csv',
-        'U_alpha': f'x{a_id}xU_alpha.csv',
-        'ALPHA_alpha': f'x{a_id}xALPHA_alpha.csv',
-        'H_depth_alpha': f'x{a_id}xH_depth_alpha.csv',
-        'advection': f'x{a_id}xAdvection.csv',
-        'vorticity': f'x{a_id}xVorticity.csv',
-        'ycrossing': f'x{a_id}xYcrossing.csv',
-        'uhat': f'x{a_id}xu_hat.csv',
-        'dragpart1': f'x{a_id}xDragPart1.csv',
-        'dragpart2': f'x{a_id}xDragPart2.csv',
-        'drag1': f'x{a_id}xDrag1.csv',
-        'transport': f'x{a_id}xTransport.csv',
-        'FX': f'x{a_id}xFX.csv',    
-        'FY': f'x{a_id}xFY.csv',
-        'k.b': f'x{a_id}xk_b.csv',
+        # 'H_alpha': f'x{a_id}xH_alpha.csv',
+        # 'U_alpha': f'x{a_id}xU_alpha.csv',
+        # 'ALPHA_alpha': f'x{a_id}xALPHA_alpha.csv',
+        # 'H_depth_alpha': f'x{a_id}xH_depth_alpha.csv',
+        # 'advection': f'x{a_id}xAdvection.csv',
+        # 'vorticity': f'x{a_id}xVorticity.csv',
+        # 'ycrossing': f'x{a_id}xYcrossing.csv',
+        # 'uhat': f'x{a_id}xu_hat.csv',
+        # 'dragpart1': f'x{a_id}xDragPart1.csv',
+        # 'dragpart2': f'x{a_id}xDragPart2.csv',
+        # 'drag1': f'x{a_id}xDrag1.csv',
+        # 'transport': f'x{a_id}xTransport.csv',
+        # 'FX': f'x{a_id}xFX.csv',    
+        # 'FY': f'x{a_id}xFY.csv',
+        # 'k.b': f'x{a_id}xk_b.csv',
     }
 
 
@@ -375,10 +375,10 @@ def main():
     #sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Middle_particle23/case230427_4fine"
     #sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Middle_particle23/case230427_4coarse"
     #sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Fine_particle9/case090429_1"
-    # sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Fine_particle9/case090912_1"
+    sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Fine_particle9/case090912_1"
     #sol="/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Coarse_paticle37/case370428_1"
     #sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Large_particle53/case530826_4"
-    sol = "/media/amber/53EA-E81F/PhD/case231020_6"
+    # sol = "/media/amber/53EA-E81F/PhD/case231020_6"
 
     X, Y, Z = fluidfoam.readmesh(sol)
     dx = np.gradient(X, axis=0)
@@ -386,10 +386,10 @@ def main():
     times = np.arange(4, 15, 1)  # 对应原来的1-79,步长2
     results = []
     BASE_PATH = '/home/amber/postpro/selecting_variant/'
-    # FILE_PREFIX = 'case230427_4midd'  # 修改这里即可自动更新文件名
-    # FILE_PREFIX = 'case090912_1'  # 修改这里即可自动更新文件名
+    # FILE_PREFIX = 'case230427_4'  # 修改这里即可自动更新文件名
+    FILE_PREFIX = 'case090912_1'  # 修改这里即可自动更新文件名
     #FILE_PREFIX = 'case530628_1'  # 修改这里即可自动更新文件名
-    FILE_PREFIX = 'case231020_6'  # 修改这里即可自动更新文件名
+    # FILE_PREFIX = 'case231020_6'  # 修改这里即可自动更新文件名
 
     for time_v in times:
         result = process_time_step(sol, time_v, X, Y,dx,dy)

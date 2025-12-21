@@ -36,6 +36,8 @@ def get_output_files():
         'gamma_fitted': f'x{a_id}xgamma_fitted.csv',
         'r_squared_below': f'x{a_id}xr_squared_below.csv',
         'r_squared_above': f'x{a_id}xr_squared_above.csv',
+        'uavalue_norm': f'x{a_id}xuavalue_norm.csv',
+        'yvalue_norm': f'x{a_id}xyvalue_norm.csv',
     }
 
 def fit_velocity_profile(yvalue, uavalue, A, save_plot, plot_dir, time_v):
@@ -56,78 +58,117 @@ def fit_velocity_profile(yvalue, uavalue, A, save_plot, plot_dir, time_v):
     fitted_below_data = None
     fitted_above_data = None
 
-    mask_below_max = yvalue <= y_max_velocity
-    y_below = yvalue[mask_below_max]
-    u_below = uavalue[mask_below_max]
+    
+    # ==================== 区域划分和拟合 ====================
+    # 定义分界线
+    # y_threshold = 0.001  # 你指定的分界线
+
+    # 区域划分
+    mask_below = (yvalue <= y_max_velocity)
+    mask_above = (yvalue > y_max_velocity )
+
+    y_below = yvalue[mask_below]
+    u_below = uavalue[mask_below]
+    y_above = yvalue[mask_above]
+    u_above = uavalue[mask_above]
+
+    # 初始化结果变量
+    fitted_below_data = None
+    fitted_middle_data = None
+    fitted_above_data = None
 
     av_fitted = 0.0
+    beta_fitted = 0.0
+    gamma_fitted = 1.0
     r_squared_below = 0.0
+    r_squared_middle = 0.0
+    r_squared_above = 0.0
 
-    # 添加基础验证
+    # ==================== 1. BELOW区域拟合（线性拟合） ====================
     if len(y_below) > 2 and y_max_velocity > 0 and u_max_velocity > 0:
         y_normalized = y_below / y_max_velocity
         u_normalized = u_below / u_max_velocity
         
         # 确保所有值都大于0且合理
         valid_mask = (y_normalized > 1e-6) & (u_normalized > 1e-6) & (y_normalized <= 1.0)
-        y_normalized = y_normalized[valid_mask]
-        u_normalized = u_normalized[valid_mask]
+        y_normalized_below = y_normalized[valid_mask]
+        u_normalized_below = u_normalized[valid_mask]
         
-        if len(y_normalized) > 2:
+        if len(y_normalized_below) > 2:
             try:
-                X_fit = np.log(y_normalized)
-                Y_fit = np.log(u_normalized)
+                # 取对数进行线性拟合
+                X_fit = np.log(y_normalized_below)        # ln(y/y_max)
+                Y_fit = np.log(u_normalized_below)        # ln(u/u_max)
                 
-                # 方法1: 强制过原点拟合（更符合物理意义）
-                # Y = m*X + 0, 其中 m = 1/av
-                slope = np.sum(X_fit * Y_fit) / np.sum(X_fit**2)
-                intercept = 0.0  # 强制截距为0
+                # 强制通过原点 (0,0) 的线性回归：ln(u/u_max) = slope * ln(y/y_max)
+                # 即：u/u_max = (y/y_max)^slope，所以 av = 1/slope
                 
-                # 方法2: 如果你想用polyfit但检查截距（备选方案）
-                # slope_poly, intercept_poly = np.polyfit(X_fit, Y_fit, 1)
-                # 如果截距很小，可以使用polyfit结果
-                # if abs(intercept_poly) < 0.1:  # 阈值可根据实际情况调整
-                #     slope = slope_poly
-                #     intercept = intercept_poly
+                # 方法1：强制通过原点的拟合
+                slope_forced = np.sum(X_fit * Y_fit) / np.sum(X_fit**2)
                 
-                # 计算 R²（使用过原点模型的R²）
-                y_pred = slope * X_fit  # 注意：这里用 slope*X_fit + 0
-                ss_res = np.sum((Y_fit - y_pred) ** 2)
+                # 方法2：不强制通过原点的拟合（用于比较）
+                slope_free, intercept_free = np.polyfit(X_fit, Y_fit, 1)
+                
+                # 计算两种方法的R²
+                # 强制拟合
+                y_pred_forced = slope_forced * X_fit
+                ss_res_forced = np.sum((Y_fit - y_pred_forced) ** 2)
                 ss_tot = np.sum((Y_fit - np.mean(Y_fit)) ** 2)
-                r_squared_below = 1 - (ss_res / ss_tot) if ss_tot != 0 else 0
+                r_squared_forced = 1 - (ss_res_forced / ss_tot) if ss_tot != 0 else 0
                 
-                # av = 1/slope
-                if abs(slope) > 1e-6:
-                    av_fitted = 1.0 / slope
+                # 自由拟合
+                y_pred_free = slope_free * X_fit + intercept_free
+                ss_res_free = np.sum((Y_fit - y_pred_free) ** 2)
+                r_squared_free = 1 - (ss_res_free / ss_tot) if ss_tot != 0 else 0
+                
+                # 选择标准：检查截距是否接近0
+                boundary_error = abs(intercept_free)
+                
+                if boundary_error < 0.1 and r_squared_free > r_squared_forced:  # 放宽截距容差
+                    slope = slope_free
+                    intercept = intercept_free
+                    fit_method = "free"
+                    r_squared_below = r_squared_free
+                    print(f"选择自由拟合：截距={intercept:.4f}接近0，且R²更高")
                 else:
-                    av_fitted = 0.0
+                    slope = slope_forced
+                    intercept = 0.0
+                    fit_method = "forced"
+                    r_squared_below = r_squared_forced
+                    print(f"选择强制拟合：截距误差={boundary_error:.4f}或R²较低")
                 
-                print(f"ymax以下拟合结果: av = {av_fitted:.4f}, R² = {r_squared_below:.4f}")
-                print(f"斜率: {slope:.4f}, 截距: {intercept:.4f}")
+                # 计算av：u/u_max = (y/y_max)^(1/av) => 1/av = slope => av = 1/slope
+                av_fitted = 1.0 / slope if abs(slope) > 1e-6 else 0.0
                 
-                # 检查边界条件：当y=Hm时，u是否接近umax
-                boundary_check = f"边界检查: y/Hm=1时，u/umax应接近1，实际为{np.exp(intercept):.4f}"
-                print(boundary_check)
+                print(f"BELOW区域幂律拟合: av = {av_fitted:.4f}")
+                print(f"  斜率(slope) = {slope:.4f}, 截距 = {intercept:.4f}")
+                print(f"  R²(强制) = {r_squared_forced:.4f}, R²(自由) = {r_squared_free:.4f}")
+                print(f"  选择方法: {fit_method}")
                 
-                # 保存拟合数据用于绘图
+                # 验证边界条件：当y/y_max=1时，u/u_max应该接近1
+                u_at_boundary = np.exp(slope * np.log(1.0) + intercept)  # = exp(intercept)
+                print(f"  边界验证: u/u_max(y/y_max=1) = {u_at_boundary:.4f}")
+                
+                # 保存拟合数据
                 fitted_below_data = {
                     'y_original': y_below,
                     'u_original': u_below,
-                    'y_normalized': y_normalized,
-                    'u_normalized': u_normalized,
+                    'y_normalized': y_normalized_below,
+                    'u_normalized': u_normalized_below,
                     'slope': slope,
                     'intercept': intercept,
                     'av': av_fitted,
-                    'r_squared': r_squared_below
+                    'r_squared': r_squared_below,
+                    'region': 'below',
+                    'fit_method': fit_method
                 }
                 
             except Exception as e:
-                print(f"ymax以下拟合失败: {e}")
-                fitted_below_data = None
-    else:
-        print("ymax以下数据不足或参数无效")
+                print(f"BELOW区域拟合失败: {e}")
 
- 
+
+                
+
  #==================== 拟合2: ymax以上位置 ====================
     mask_above_max = (yvalue > y_max_velocity) 
     y_above = yvalue[mask_above_max]
@@ -363,13 +404,13 @@ def fit_velocity_profile(yvalue, uavalue, A, save_plot, plot_dir, time_v):
         fig, ax = plt.subplots(1, 1, figsize=(10, 8))
         
         # 分离 below 和 above 区域的数据点
-        mask_below = yvalue <= y_max_velocity
-        mask_above = yvalue > y_max_velocity
+        # mask_below = yvalue <= y_max_velocity
+        # mask_above = yvalue > y_max_velocity
         
         # Below 区域：y/y_max
         y_below_norm = yvalue[mask_below] / y_max_velocity
         u_below_norm = uavalue[mask_below] / u_max_velocity
-        
+
         # Above 区域：(y-y_max)/(H-y_max)，映射到 [1, 2] 区间
         H = np.max(yvalue)
         y_above_norm = 1 + (yvalue[mask_above] - y_max_velocity) / (H - y_max_velocity)
@@ -378,6 +419,7 @@ def fit_velocity_profile(yvalue, uavalue, A, save_plot, plot_dir, time_v):
         # 绘制原始数据点
         ax.scatter(u_below_norm, y_below_norm, alpha=0.6, 
                 label='Below z_max (z/z_max)', color='blue', s=30)
+        
         ax.scatter(u_above_norm, y_above_norm, alpha=0.6, 
                 label='Above z_max (1+(z-z_max)/(H-z_max))', color='green', s=30)
         
@@ -391,13 +433,11 @@ def fit_velocity_profile(yvalue, uavalue, A, save_plot, plot_dir, time_v):
             y_fit_below_norm = y_below_norm
             u_fit_below_norm = y_fit_below_norm ** (1/fitted_below_data['av'])
             
-            # 按 y 值排序以便绘制连续曲线
-            sort_idx = np.argsort(y_fit_below_norm)
-            y_fit_below_norm_sorted = y_fit_below_norm[sort_idx]
-            u_fit_below_norm_sorted = u_fit_below_norm[sort_idx]
             
-            ax.plot(u_fit_below_norm_sorted, y_fit_below_norm_sorted, 'r-', linewidth=2, 
+            
+            ax.plot(u_fit_below_norm, y_fit_below_norm, 'r-', linewidth=2, 
                     label=f'Below fit (av={fitted_below_data["av"]:.3f}, R²={fitted_below_data["r_squared"]:.3f})')
+            
         
         # 绘制 above y_max 的拟合曲线 - 使用原始数据点
         if fitted_above_data and 'fit_results' in fitted_above_data:
@@ -459,7 +499,8 @@ def calculate_derived_values(
 
     u_max_velocity,beta_fitted,y_max_velocity,gamma_fitted,av_fitted,r_squared_below,r_squared_above= fit_velocity_profile(yvalue,uavalue,A,save_plot,plot_dir,time_v)
     
-    
+    uavalue_norm =uavalue/u_max_velocity
+    yvalue_norm =yvalue/y_max_velocity
     
     """计算衍生量"""
 
@@ -510,6 +551,8 @@ def calculate_derived_values(
         'gamma_fitted': [gamma_fitted],
         'r_squared_below': [r_squared_below],
         'r_squared_above': [r_squared_above],
+        'uavalue_norm': uavalue_norm.tolist(),
+        'yvalue_norm': yvalue_norm.tolist(),
     }
 
 def process_time_step(sol, time_v, X, Y,Z,dx,dy,z0,A):
@@ -643,7 +686,7 @@ def main():
     Y = Y[z_mask]
     dx = np.gradient(X, axis=0)
     dy = np.gradient(Y, axis=0)
-    times = np.arange(4, 6, 1)  # 对应原来的1-79,步长2
+    times = np.arange(4, 11, 1)  # 对应原来的1-79,步长2
     results = []
     BASE_PATH = '/home/amber/postpro/selecting_variant/'
     FILE_PREFIX = 'case231020_5middle'  # 修改这里即可自动更新文件名
@@ -651,7 +694,8 @@ def main():
 
     
     # === 定义A值的列表 ===
-    a_values = [Fraction(1, 2), Fraction(1, 3), Fraction(1, 4), Fraction(1, 1)]  # 1/2, 1/3, 1/4, 1
+    a_values = [Fraction(1, 4), Fraction(1, 3), Fraction(1, 2), Fraction(1, 1)]  # 1/2, 1/3, 1/4, 1
+    # a_values = [Fraction(1, 4)]
     
     # === 对每个A值进行循环 ===
     for a_val in a_values:
