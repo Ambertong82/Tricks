@@ -142,6 +142,7 @@ def calculate_derived_values(
     Rtt = fenzi / fenmu
     Rtt2 = uavalueorigin*grad_dudx/fenmu
 
+
     Nttfenzi = (rhomix-1000)/1000*uavalueorigin*dalphaudx
     Nttfenmu = np.abs(dtotaludy)*dalphaudy * y_crossing
     Nttfenmu2 = np.abs(grad_dudy)*dalphaudy * y_crossing

@@ -1371,7 +1371,7 @@ class TurbidityCurrentAnalyzer:
             f'Rotation_streamlines_t{time_v}s.png', 
             "$\hat{U}_s$ [m/s]", -0.3, 0.07
         )
-        self.plot_streamlines(
+        self.plot_streamlines2(
             xi, yi, interpolated['uxi'], interpolated['uyi'], 
             interpolated['uxi'], interpolated['alpha_i'], time_v, 
             positions, y_text, f'Original Velocity Streamlines (t={time_v})',

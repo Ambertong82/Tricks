@@ -42,10 +42,10 @@ class AnalyzerConfig:
     sol: str = '/media/amber/53EA-E81F/PhD/case231020_5'
     # sol: str = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Fine_particle9/3d/case091020_5"
     # output_dir: str = "/home/amber/postpro/POD/u_umean_tc2dcoarse"
-    output_dir: str = "/home/amber/postpro/POD/u_umean_coarse_tc3dmiddle"
+    output_dir: str = "/home/amber/postpro/POD/u_umean_fine_tc3dmiddle"
     alpha_threshold: float = 1e-5
     y_min: float = 0.0
-    times: Iterable[int] = (5,7, 10)
+    times: Iterable[int] = (5,)
     head_height: float = 0.3
     q_threshold: float = 0.5
     lambda2_threshold: float = -0.1
@@ -215,7 +215,7 @@ class TurbidityCurrentAnalyzer:
         self._plot_streamlines(xi, yi, u_rot, v_rot, alpha_i, markers, time_v,
                                "Rotation Velocity Streamlines",
                                f"Rotation_streamlines_t{time_v}s.png")
-        self._plot_streamlines(xi, yi, fields["uxi"], v_rot, alpha_i, markers, time_v,
+        self._plot_streamlines2(xi, yi, fields["uxi"], v_rot, alpha_i, markers, time_v,
                                "Original Velocity Streamlines",
                                f"Original_streamlines_t{time_v}s.png")
 
@@ -306,7 +306,7 @@ class TurbidityCurrentAnalyzer:
             vel = np.column_stack((ux[region], uy[region]))
             try:
                 geo = ManualPCA().fit(coords).properties()
-                kin = ManualPCA().fit(vel - vel.mean(axis=0)).properties()
+                kin = ManualPCA().fit(vel).properties()
             except Exception as exc:
                 print(f"PCA Q idx={idx} failed: {exc}")
                 continue
@@ -414,6 +414,28 @@ class TurbidityCurrentAnalyzer:
         plt.title(f"{title} (t={time_v}s)")
         plt.savefig(os.path.join(self.cfg.output_dir, filename), dpi=300, bbox_inches="tight")
         plt.close()
+
+    def _plot_streamlines2(self, xi, yi, ux, uy, alpha, markers, time_v, title, filename):
+        plt.figure(figsize=self.style.fig_size)
+        plt.contourf(xi, yi, alpha, levels=np.linspace(0, 0.015, 128), cmap="gray_r", alpha=0.75)
+        # mask = alpha > self.cfg.alpha_threshold
+        
+        color_field = np.clip(ux, -0.3, 0.07)
+        plt.streamplot(
+            xi, yi,
+            ux, uy,
+            color = color_field,
+            cmap="coolwarm", linewidth=1, density=8, arrowsize=2, arrowstyle="->",
+        )
+        plt.contour(xi, yi, alpha, **self.style.alpha_contour)
+        self._draw_markers(markers)
+        plt.xlabel("x [m]")
+        plt.ylabel("y [m]")
+        plt.xlim(*self.style.x_lim)
+        plt.ylim(*self.style.y_lim)
+        plt.title(f"{title} (t={time_v}s)")
+        plt.savefig(os.path.join(self.cfg.output_dir, filename), dpi=300, bbox_inches="tight")
+        plt.close()    
 
     def _plot_vorticity(self, xi, yi, ux, uy, alpha, markers, time_v):
         dy, dx = yi[1, 0] - yi[0, 0], xi[0, 1] - xi[0, 0]
