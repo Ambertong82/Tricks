@@ -20,8 +20,8 @@ class TurbidityCurrentAnalyzer:
         self.output_dir = "/home/amber/postpro/u_umean/tc3d_d23"
         self.alpha_threshold = 1e-5
         self.y_min = 0
-        self.times = [5]
-        self.FIG_SIZE = (40, 6)
+        self.times = [12]
+        self.FIG_SIZE = (40, 8)
         self.X_LIM = (0.0, 1.6)
         self.Y_LIM = (0.0, 0.3)
         self.Height = 0.3
@@ -46,12 +46,12 @@ class TurbidityCurrentAnalyzer:
         
         # Initialize global plot settings
         plt.rcParams.update({
-            'font.size': 28,
-            'axes.titlesize': 28,
-            'axes.labelsize': 24,
-            'xtick.labelsize': 24,
-            'ytick.labelsize': 24,
-            'legend.fontsize': 24
+            'font.size': 36,
+            'axes.titlesize': 36,
+            'axes.labelsize': 32,
+            'xtick.labelsize': 32,
+            'ytick.labelsize': 32,
+            'legend.fontsize': 32
         })
 
     def calculate_q_criterion(self, dUx, dUy, dVx, dVy):
@@ -209,9 +209,10 @@ class TurbidityCurrentAnalyzer:
         
         plt.contour(xi, yi, alpha_i, **self.ALPHA_CONTOUR_PARAMS)
 
-        for label, x_pos in positions.items():
+        for idx, (label, x_pos) in enumerate(positions.items()):
+            offset = 0.005 if idx < 2 else -0.005
             plt.axvline(x=x_pos, color=self.colorset, linestyle='dashdot', linewidth=1, zorder=3)
-            plt.text(x_pos + 0.005, y_text, f'{label}', fontsize=20, zorder=3, color=self.colorset)
+            plt.text(x_pos + offset, y_text, f'{label}', fontsize=40, zorder=3, color=self.colorset)
         
 
         plt.xlabel('x [m]')
@@ -264,9 +265,10 @@ class TurbidityCurrentAnalyzer:
         plt.contour(xi, yi, alpha_i, **self.ALPHA_CONTOUR_PARAMS)
         # plt.contour(xi, yi, alpha_i, **self.ALPHA_CONTOUR_PARAMS2)
 
-        for label, x_pos in positions.items():
-            plt.axvline(x=x_pos, color=self.colorset, linestyle='dashdot', linewidth=1, zorder=3)
-            plt.text(x_pos + 0.005, y_text, f'{label}', fontsize=20, zorder=3, color=self.colorset)
+        # for idx, (label, x_pos) in enumerate(positions.items()):
+        #     offset = 0.2 if idx ==0 else -0.05
+        #     plt.axvline(x=x_pos, color=self.colorset, linestyle='dashdot', linewidth=1, zorder=3)
+        #     plt.text(x_pos + offset, y_text, f'{label}', fontsize=40, zorder=3, color=self.colorset)
         
         plt.gca().set_aspect('auto')
         plt.xlabel('x [m]')
@@ -294,9 +296,10 @@ class TurbidityCurrentAnalyzer:
         
         plt.contour(xi, yi, alpha_i, **self.ALPHA_CONTOUR_PARAMS)
         
-        for label, x_pos in positions.items():
+        for idx, (label, x_pos) in enumerate(positions.items()):
+            offset = 0.005 if idx < 2 else -0.005
             plt.axvline(x=x_pos, color=self.colorset, linestyle='dashdot', linewidth=1, zorder=3)
-            plt.text(x_pos + 0.005, y_text, f'{label}', fontsize=20, zorder=3, color=self.colorset)
+            plt.text(x_pos + offset, y_text, f'{label}', fontsize=20, zorder=3, color=self.colorset)
         
         # cbar = plt.colorbar(contour, label=color_label, orientation='horizontal',)
         plt.xlabel('x [m]')
@@ -393,11 +396,12 @@ class TurbidityCurrentAnalyzer:
         plt.contour(xi, yi, alpha_i, **self.ALPHA_CONTOUR_PARAMS)
         # plt.contour(xi, yi, alpha_i, **self.ALPHA_CONTOUR_PARAMS2)
         # 4. 添加参考线/标签
-        for label, x_pos in positions.items():
-            plt.axvline(x=x_pos, color=self.colorset, linestyle='dashdot', 
-                       linewidth=1, zorder=3)
-            plt.text(x_pos + 0.005, y_text, f'{label}', 
-                    fontsize=20, zorder=3, color=self.colorset)
+        # for idx, (label, x_pos) in enumerate(positions.items()):
+        #     offset = 0.005 if idx < 2 else -0.005
+        #     plt.axvline(x=x_pos, color=self.colorset, linestyle='dashdot', 
+        #            linewidth=1, zorder=3)
+        #     plt.text(x_pos + offset, y_text, f'{label}', 
+        #         fontsize=20, zorder=3, color=self.colorset)
         
         # 5. 添加颜色条和其他装饰
         # cbar = plt.colorbar(contour, label='Vorticity $\omega_z$ [1/s]', 
@@ -527,44 +531,44 @@ class TurbidityCurrentAnalyzer:
         #     plt.text(x_pos + 0.01, y_text, label, fontsize=12, color='b')
 
 
-            # === 新增：绘制速度零点连线 ===
-        if velocity_zero_points and len(velocity_zero_points) > 0:
-            zero_x, zero_y = zip(*velocity_zero_points)
+        #     # === 新增：绘制速度零点连线 ===
+        # if velocity_zero_points and len(velocity_zero_points) > 0:
+        #     zero_x, zero_y = zip(*velocity_zero_points)
             
-            # 按 x 坐标排序以确保连线顺序正确
-            sorted_indices = np.argsort(zero_x)
-            zero_x_sorted = np.array(zero_x)[sorted_indices]
-            zero_y_sorted = np.array(zero_y)[sorted_indices]
+        #     # 按 x 坐标排序以确保连线顺序正确
+        #     sorted_indices = np.argsort(zero_x)
+        #     zero_x_sorted = np.array(zero_x)[sorted_indices]
+        #     zero_y_sorted = np.array(zero_y)[sorted_indices]
             
-            # 绘制虚线
-            plt.plot(
-                zero_x_sorted, zero_y_sorted,
-                color='red',               # 蓝色虚线（可自定义）
-                linestyle='--',
-                linewidth=2,
-                label='Velocity Zero Crossing',
-                zorder=4                    # 确保在箭头上方
-            )    
+        #     # 绘制虚线
+        #     plt.plot(
+        #         zero_x_sorted, zero_y_sorted,
+        #         color='red',               # 蓝色虚线（可自定义）
+        #         linestyle='--',
+        #         linewidth=2,
+        #         label='Velocity Zero Crossing',
+        #         zorder=4                    # 确保在箭头上方
+        #     )    
 
 
-            # === 新增：绘制积分H连线 ===
-        if h_points and len(h_points) > 0:
-            h_x, h_y = zip(*h_points)
+        #     # === 新增：绘制积分H连线 ===
+        # if h_points and len(h_points) > 0:
+        #     h_x, h_y = zip(*h_points)
             
-            # 按 x 坐标排序以确保连线顺序正确
-            sorted_indices = np.argsort(h_x)
-            h_x_sorted = np.array(h_x)[sorted_indices]
-            h_y_sorted = np.array(h_y)[sorted_indices]
+        #     # 按 x 坐标排序以确保连线顺序正确
+        #     sorted_indices = np.argsort(h_x)
+        #     h_x_sorted = np.array(h_x)[sorted_indices]
+        #     h_y_sorted = np.array(h_y)[sorted_indices]
             
-            # 绘制虚线
-            plt.plot(
-                h_x_sorted, h_y_sorted,
-                color='purple',               # 蓝色虚线（可自定义）
-                linestyle='--',
-                linewidth=2,
-                label='Velocity Zero Crossing',
-                zorder=4                    # 确保在箭头上方
-            ) 
+        #     # 绘制虚线
+        #     plt.plot(
+        #         h_x_sorted, h_y_sorted,
+        #         color='purple',               # 蓝色虚线（可自定义）
+        #         linestyle='--',
+        #         linewidth=2,
+        #         label='Velocity Zero Crossing',
+        #         zorder=4                    # 确保在箭头上方
+        #     ) 
 
 
 
@@ -630,7 +634,7 @@ class TurbidityCurrentAnalyzer:
             normalized_ux[::skip_y, ::skip_x],  # 归一化后的分量
             normalized_uy[::skip_y, ::skip_x],
             speed[::skip_y, ::skip_x],  # 仍用于颜色映射（可选）
-            scale=scale,                # 设为 1.0 或更小的基础缩放
+            scale=scale*1.5,                # 设为 1.0 或更小的基础缩放
             scale_units='inches',       # 固定物理长度单位
             angles='xy',                # 确保方向正确
             width=0.0005 * arrow_scale,  # 箭头宽度
@@ -677,10 +681,11 @@ class TurbidityCurrentAnalyzer:
         c=plt.contour(xi, yi, alpha_i, **self.ALPHA_CONTOUR_PARAMS)
         
 
-        # 4. Add reference lines/labels
-        for label, x_pos in positions.items():
-            plt.axvline(x=x_pos, color=self.colorset, linestyle='dashdot', linewidth=1, zorder=3)
-            plt.text(x_pos + 0.005, y_text, f'{label}', fontsize=20, zorder=3, color=self.colorset)
+        # # 4. Add reference lines/labels
+        # for idx, (label, x_pos) in enumerate(positions.items()):
+        #     offset = 0.005 if idx < 2 else -0.005
+        #     plt.axvline(x=x_pos, color=self.colorset, linestyle='dashdot', linewidth=1, zorder=3)
+        #     plt.text(x_pos + offset, y_text, f'{label}', fontsize=20, zorder=3, color=self.colorset)
 
 
         #     # === 新增：绘制速度零点连线 ===
@@ -703,24 +708,24 @@ class TurbidityCurrentAnalyzer:
         #     )    
 
 
-            # === 新增：绘制积分H连线 ===
-        if h_points and len(h_points) > 0:
-            h_x, h_y = zip(*h_points)
+        #     # === 新增：绘制积分H连线 ===
+        # if h_points and len(h_points) > 0:
+        #     h_x, h_y = zip(*h_points)
             
-            # 按 x 坐标排序以确保连线顺序正确
-            sorted_indices = np.argsort(h_x)
-            h_x_sorted = np.array(h_x)[sorted_indices]
-            h_y_sorted = np.array(h_y)[sorted_indices]
+        #     # 按 x 坐标排序以确保连线顺序正确
+        #     sorted_indices = np.argsort(h_x)
+        #     h_x_sorted = np.array(h_x)[sorted_indices]
+        #     h_y_sorted = np.array(h_y)[sorted_indices]
             
-            # 绘制虚线
-            plt.plot(
-                h_x_sorted, h_y_sorted,
-                color='red',               # 蓝色虚线（可自定义）
-                linestyle='--',
-                linewidth=2,
-                label='Velocity Zero Crossing',
-                zorder=4                    # 确保在箭头上方
-            ) 
+        #     # 绘制虚线
+        #     plt.plot(
+        #         h_x_sorted, h_y_sorted,
+        #         color='red',               # 蓝色虚线（可自定义）
+        #         linestyle='--',
+        #         linewidth=2,
+        #         label='Velocity Zero Crossing',
+        #         zorder=4                    # 确保在箭头上方
+        #     ) 
 
 
 
@@ -854,9 +859,10 @@ class TurbidityCurrentAnalyzer:
         
 
         # 4. Add reference lines/labels
-        for label, x_pos in positions.items():
+        for idx, (label, x_pos) in enumerate(positions.items()):
+            offset = 0.005 if idx < 2 else -0.005
             plt.axvline(x=x_pos, color=self.colorset, linestyle='dashdot', linewidth=1, zorder=3)
-            plt.text(x_pos + 0.005, y_text, f'{label}', fontsize=20, zorder=3, color=self.colorset)
+            plt.text(x_pos + offset, y_text, f'{label}', fontsize=20, zorder=3, color=self.colorset)
 
 
 
@@ -1174,7 +1180,7 @@ class TurbidityCurrentAnalyzer:
 
         # Define positions for vertical lines
         positions = {
-            '$1/4H_0$': head_x - 0.25*self.Height,
+            '$1/4H_0$': head_x - 0.15*self.Height,
             '$1/3H_0$': head_x - 0.33*self.Height,
             '$1/2H_0$': head_x - 0.5*self.Height,
             '$H_0$': head_x - self.Height

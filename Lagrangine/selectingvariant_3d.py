@@ -23,14 +23,8 @@ def get_output_files():
         'ua': f'x{a_id}xua.csv',
         'ub': f'x{a_id}xub.csv',
         'Rig': f'x{a_id}xRig.csv',
-        # 'Rigg': f'x{a_id}xRigg.csv',
-        # 'omegaz': f'x{a_id}xomegaz.csv',
-        # 'reynolds12': f'x{a_id}xReynolds.csv',
-        # 'reynolds11': f'x{a_id}xReynolds11.csv',
-        # 'reynolds22': f'x{a_id}xReynolds22.csv',
-        # 'yplus': f'x{a_id}xYPLUS.csv',
-        # 'alpha': f'x{a_id}xALPHA.csv',
-   
+
+   ### intergrated value realted to velocity and head depth
         'U': f'x{a_id}xU.csv',
         # 'ALPHA': f'x{a_id}xALPHA.csv',
         'H_depth': f'x{a_id}xH_depth.csv',
@@ -45,6 +39,15 @@ def get_output_files():
         'Udir': f'x{a_id}xUdir.csv',
         'u_max_velocity': f'x{a_id}xu_max_velocity.csv',
         'y_max_velocity': f'x{a_id}xy_max_velocity.csv',
+
+
+        ## turbulence related quantities
+        'G': f'x{a_id}xG.csv',
+        'densityGrad': f'x{a_id}xdensityGrad.csv',
+        'dissipation': f'x{a_id}xdissipation.csv',
+        'drag_1': f'x{a_id}xdrag_1.csv',
+        'drag_2': f'x{a_id}xdrag_2.csv',
+        'drag_3': f'x{a_id}xdrag_3.csv',
 
     }
 
@@ -180,18 +183,45 @@ def process_time_step(sol, time_v, X, Y,Z,dx,dy,z0):
     Ua = fluidfoam.readvector(sol, str(time_v), "U.a")
     Ub = fluidfoam.readvector(sol, str(time_v), "U.b")
     alpha = fluidfoam.readscalar(sol, str(time_v), "alpha.a")
+    beta = fluidfoam.readscalar(sol, str(time_v), "alpha.b")
     nutb = fluidfoam.readscalar(sol, str(time_v), "nut.b")
     kb = fluidfoam.readscalar(sol, str(time_v), "k.b")
     omegab = fluidfoam.readscalar(sol, str(time_v), "omega.b")
-    vorticity = fluidfoam.readvector(sol, str(time_v), "vorticity")
-    gradUa = fluidfoam.readtensor(sol, str(time_v), "grad(U.a)")
+    # vorticity = fluidfoam.readvector(sol, str(time_v), "vorticity")
+    gradUb = fluidfoam.readtensor(sol, str(time_v), "grad(U.b)")
     nuFra = fluidfoam.readscalar(sol, str(time_v), "nuFra")
+    gradbeta = fluidfoam.readvector(sol, str(time_v), "grad(alpha.b)")
+    laplacianbeta = fluidfoam.readscalar(sol, str(time_v), "div(grad(alpha.b))")
+    gradkb = fluidfoam.readvector(sol, str(time_v), "grad(k.b)")
+    laplaciankb = fluidfoam.readscalar(sol, str(time_v), "div(grad(k.b))")
+    gamma = fluidfoam.readscalar(sol, str(time_v), "K")
+    SUS = fluidfoam.readscalar(sol, str(time_v), "SUS")
 
-    G = 2*(gradUa[0]**2 + gradUa[4]**2 + gradUa[8]**2) + \
-        (gradUa[1]+gradUa[3])**2 + (gradUa[2]+gradUa[6])**2 + (gradUa[5]+gradUa[7])**2 -\
-        -2/3*(gradUa[0]+gradUa[4]+gradUa[8])**2
-    G = G*(1-alpha)*1000*nutb
+#### 计算衍生量 G 和 densityGrad and ....
     
+    Gpre = 2*(gradUb[0]**2 + gradUb[4]**2 + gradUb[8]**2) + \
+        (gradUb[1]+gradUb[3])**2 + (gradUb[2]+gradUb[6])**2 + (gradUb[5]+gradUb[7])**2 
+    G = Gpre*(1-alpha)*1000*nutb
+
+    densityGradpre = gradUb[0]*gradbeta[0]**2+gradUb[4]*gradbeta[1]**2+gradUb[8]*gradbeta[2]**2+\
+                (2*gradUb[1]*gradbeta[0]*gradbeta[1] + 2*gradUb[2]*gradbeta[0]*gradbeta[2] + 2*gradUb[5]*gradbeta[1]*gradbeta[2]) 
+
+    densityGrad = beta * 1000*nutb*densityGradpre
+
+    gradk = (nutb/0.8+1e-6)*1000*(laplaciankb*beta+gradbeta*gradkb)
+
+    dissipation = -beta*1000*0.09*kb*omegab
+
+    veldiff = (Ub[0] - Ua[0])*gradbeta[0] + (Ub[1] - Ua[1])*gradbeta[1] + (Ub[2] - Ua[2])*gradbeta[2]
+
+    drag_1 = gamma*veldiff*nutb/SUS/beta
+
+    drag_2 = gamma*(1/np.sqrt(SUS)-1)*2*beta*kb
+
+    drag_3 = gamma * (1/np.sqrt(SUS)-1)*beta*kb*nutb/omegab*laplacianbeta
+
+
+
 
     # z_mask = np.isclose(Z, 0.255)  # 或用 Z == 0（如果数据是精确的）
     z_mask = np.isclose(Z,z0)
@@ -202,9 +232,15 @@ def process_time_step(sol, time_v, X, Y,Z,dx,dy,z0):
     nuFra = nuFra[z_mask]
     kb = kb[z_mask]
     omegab = omegab[z_mask]
-    vorticity = vorticity[:,z_mask]
-    gradUa = gradUa[:,z_mask]
+    # vorticity = vorticity[:,z_mask]
+    gradUb = gradUb[:,z_mask]
     G = G[z_mask]
+    densityGrad = densityGrad[z_mask]
+    gradk = gradk[:,z_mask]
+    dissipation = dissipation[z_mask]
+    drag_1 = drag_1[z_mask]
+    drag_2 = drag_2[z_mask]
+    drag_3 = drag_3[z_mask]
 
 
     # 定位头部位置
@@ -238,16 +274,21 @@ def process_time_step(sol, time_v, X, Y,Z,dx,dy,z0):
     nutb_value = nutb[mask]
     kinetic_energy = kb[mask]
     G_value = G[mask]
+    densityGrad_value = densityGrad[mask]
+    dissipation_value = dissipation[mask]
+    drag_1_value = drag_1[mask]
+    drag_2_value = drag_2[mask]
+    drag_3_value = drag_3[mask]
     max_ke = kinetic_energy.max()
     ke_dimless = kinetic_energy / max_ke if max_ke != 0 else kinetic_energy
     omega_value = omegab[mask]
-    vorticity = vorticity[2][mask]  # 提取z方向的涡量分量
-    grad_dudx = gradUa[0][mask]
-    grad_dvdx = gradUa[1][mask]
-    grad_dudy = gradUa[3][mask]
-    grad_dvdy = gradUa[4][mask]
-    grad_dudz = gradUa[6][mask]
-    grad_dvdz = gradUa[7][mask]
+    # vorticity = vorticity[2][mask]  # 提取z方向的涡量分量
+    grad_dudx = gradUb[0][mask]
+    grad_dvdx = gradUb[1][mask]
+    grad_dudy = gradUb[3][mask]
+    grad_dvdy = gradUb[4][mask]
+    grad_dudz = gradUb[6][mask]
+    grad_dvdz = gradUb[7][mask]
     nuFra_value = nuFra[mask]
     rho_mix = alpha_value * 2217 + 1000
     # muEffa = (nuFra_value +nutb_value)* alpha_value*3217
@@ -289,7 +330,7 @@ def process_time_step(sol, time_v, X, Y,Z,dx,dy,z0):
         'uadimless': (uavalue / 0.27).tolist(),
         'ubdimless': (ubvalue / 0.27).tolist(),
         'kinetic_energy': kinetic_energy.tolist(),
-        'vorticity': vorticity.tolist(),
+        # 'vorticity': vorticity.tolist(),
         'uay': uavalueyy.tolist(),
         'uby': ubvalueyy.tolist(),
         'ke_dimless': ke_dimless.tolist(),
@@ -297,6 +338,11 @@ def process_time_step(sol, time_v, X, Y,Z,dx,dy,z0):
         'G': G_value.tolist(),
         'grad_dudx': grad_dudx.tolist(),
         'dtaudy': dtaudy.tolist(),
+        'densityGrad': densityGrad_value.tolist(),
+        'dissipation': dissipation_value.tolist(),
+        'drag_1': drag_1_value.tolist(),
+        'drag_2': drag_2_value.tolist(),
+        'drag_3': drag_3_value.tolist(),
         **derived
     }
 
@@ -339,7 +385,9 @@ def main():
     #sol="/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Coarse_paticle37/case370428_1"
     #sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Large_particle53/case530826_4"
     # sol = "/media/amber/53EA-E81F/PhD/case231020_5"
-    sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Fine_particle9/case091020_5"
+    # sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Fine_particle9/case091020_5"
+    sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Middle_particle23/3D/case230209_2"
+
   
 
     X, Y, Z = fluidfoam.readmesh(sol)
@@ -351,14 +399,14 @@ def main():
     Y = Y[z_mask]
     dx = np.gradient(X, axis=0)
     dy = np.gradient(Y, axis=0)
-    times = np.arange(4, 15, 1)  # 对应原来的1-79,步长2
+    times = np.arange(15, 35, 1)  # 对应原来的1-79,步长2
     results = []
     BASE_PATH = '/home/amber/postpro/selecting_variant/'
     # FILE_PREFIX = 'case230427_4midd'  # 修改这里即可自动更新文件名
     # FILE_PREFIX = 'case090912_1'  # 修改这里即可自动更新文件名
     #FILE_PREFIX = 'case530628_1'  # 修改这里即可自动更新文件名
     # FILE_PREFIX = 'case231020_5middle'  # 修改这里即可自动更新文件名
-    FILE_PREFIX = 'case091020_5middle'  # 修改这里即可自动更新文件名
+    FILE_PREFIX = 'case230209_2middle'  # 修改这里即可自动更新文件名
 
     
     # === 定义A值的列表 ===

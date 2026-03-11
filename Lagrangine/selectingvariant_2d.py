@@ -375,10 +375,11 @@ def main():
     #sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Middle_particle23/case230427_4fine"
     #sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Middle_particle23/case230427_4coarse"
     #sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Fine_particle9/case090429_1"
-    sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Fine_particle9/case090912_1"
+    # sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Fine_particle9/case090912_1"
     #sol="/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Coarse_paticle37/case370428_1"
     #sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Large_particle53/case530826_4"
     # sol = "/media/amber/53EA-E81F/PhD/case231020_6"
+    sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Middle_particle23/3D/case231020_5ori"
 
     X, Y, Z = fluidfoam.readmesh(sol)
     dx = np.gradient(X, axis=0)
@@ -387,7 +388,7 @@ def main():
     results = []
     BASE_PATH = '/home/amber/postpro/selecting_variant/'
     # FILE_PREFIX = 'case230427_4'  # 修改这里即可自动更新文件名
-    FILE_PREFIX = 'case090912_1'  # 修改这里即可自动更新文件名
+    FILE_PREFIX = 'case231020_5ori'  # 修改这里即可自动更新文件名
     #FILE_PREFIX = 'case530628_1'  # 修改这里即可自动更新文件名
     # FILE_PREFIX = 'case231020_6'  # 修改这里即可自动更新文件名
 
