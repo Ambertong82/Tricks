@@ -6,6 +6,10 @@ from scipy.interpolate import griddata
 import matplotlib.pyplot as plt
 from scipy.ndimage import gaussian_filter
 from matplotlib.colors import TwoSlopeNorm
+from vorticity_transport.diagnostics import compare_gradients
+from vorticity_transport.plotting import plot_transport_terms
+from vorticity_transport.compute_l_terms import compute_l_terms
+from vorticity_transport.compute_r_terms import compute_r_terms
 # from sklearn.decomposition import PCA
 from typing import Dict, List, Tuple, Optional, Union
 from dataclasses import dataclass
@@ -31,26 +35,19 @@ class VectorCalculus:
         """批量点积计算: a · b"""
         return np.einsum('i...,i...->...', a, b)
     
-    @staticmethod
-    def dot_product_vector_gradient(grad_f: np.ndarray, tensor: np.ndarray) -> np.ndarray:
-        """向量与张量的点积 (grad_f · Tensor)"""
-
-        if tensor.shape[0] == 9:
-            shape = tensor.shape[1:]
-            tensor = tensor.reshape(3, 3, *shape, order='C')
-        
-        # tensor[i, j] * grad_f[j] -> result[i]
-        return np.einsum('ijn...,jn...->in...', tensor, grad_f)
 
     @staticmethod  
     def tensor_vector_contraction(tensor: np.ndarray, vector: np.ndarray) -> np.ndarray:
-        """张量与向量的缩并 (Tensor · vector)"""
-        if tensor.shape[0] == 9:
-            shape = tensor.shape[1:]
-            # 根据 OpenFOAM 的排列更正: xx yx zx; xy yy zy...
-            tensor = tensor.reshape(3, 3, *shape, order='C')
-        # tensor[i, j] * vector[j] -> result[i]
-        return np.einsum('ijn...,jn...->in...', tensor, vector)
+        """二阶张量与向量缩并：result_i = tensor_ij * vector_j。"""
+        if tensor.ndim < 2 or tensor.shape[0] != 3 or tensor.shape[1] != 3:
+            raise ValueError(
+                f"tensor_vector_contraction 要求 tensor 形状为 (3,3,...)，当前为 {tensor.shape}"
+            )
+        if vector.ndim < 1 or vector.shape[0] != 3:
+            raise ValueError(
+                f"tensor_vector_contraction 要求 vector 形状为 (3,...)，当前为 {vector.shape}"
+            )
+        return np.einsum('ij...,j...->i...', tensor, vector)
         
     @staticmethod
     def divergence(grad_U: np.ndarray) -> np.ndarray:
@@ -61,6 +58,8 @@ class VectorCalculus:
 
 # ============================================================================
 # 微分算子类 - 规范化数值微分计算 (支持非均匀网格)
+# 关于出现的所有速度梯度，全部采用本程序计算的数值梯度，避免直接使用 OpenFOAM 输出的梯度数据，确保一致性和可控性。
+# 即输出的gradU[i,j]=dui/dxj，符合雅可比矩阵的约定（行索引 i 是速度分量，列索引 j 是空间方向）。这样在后续计算中，无论是计算涡量还是 Lamb 向量，都可以直接使用这个统一格式的梯度数据，避免了混淆和错误。
 # ============================================================================
 
 class FiniteDifference:
@@ -106,10 +105,48 @@ class FiniteDifference:
         vort[1] = np.gradient(Ux, az, axis=2) - np.gradient(Uz, ax, axis=0)
         vort[2] = np.gradient(Uy, ax, axis=0) - np.gradient(Ux, ay, axis=1)
         return vort
+    
+    @staticmethod
+    def compute_second_derivative_scalar(cx,cy,cz,f):
+        """计算标量场 Hessian，返回形状 (3, 3, nx, ny, nz)。"""
+        if f.ndim != 3:
+            raise ValueError(f"compute_second_derivative_scalar 仅支持标量场 (nx,ny,nz)，当前为 {f.shape}")
+
+        ax, ay, az = FiniteDifference._get_axes(cx, cy, cz)
+        d2f_dx2 = np.gradient(np.gradient(f, ax, axis=0), ax, axis=0)
+        d2f_dy2 = np.gradient(np.gradient(f, ay, axis=1), ay, axis=1)
+        d2f_dz2 = np.gradient(np.gradient(f, az, axis=2), az, axis=2)
+
+        df_dx = np.gradient(f, ax, axis=0)
+        df_dy = np.gradient(f, ay, axis=1)
+        df_dz = np.gradient(f, az, axis=2)
+
+        d2f_dxdy = np.gradient(df_dx, ay, axis=1)
+        d2f_dxdz = np.gradient(df_dx, az, axis=2)
+        d2f_dydz = np.gradient(df_dy, az, axis=2)
+
+        d2f_dydx = np.gradient(df_dy, ax, axis=0)
+        d2f_dzdx = np.gradient(df_dz, ax, axis=0)
+        d2f_dzdy = np.gradient(df_dz, ay, axis=1)
+
+        d2f_xy = 0.5 * (d2f_dxdy + d2f_dydx)
+        d2f_xz = 0.5 * (d2f_dxdz + d2f_dzdx)
+        d2f_yz = 0.5 * (d2f_dydz + d2f_dzdy)
+
+        return np.stack([
+            np.stack([d2f_dx2, d2f_xy,  d2f_xz], axis=0),
+            np.stack([d2f_xy,  d2f_dy2, d2f_yz], axis=0),
+            np.stack([d2f_xz,  d2f_yz,  d2f_dz2], axis=0),
+        ], axis=0)
+
+
 
     @staticmethod
     def compute_second_derivative_simple(cx, cy, cz, f):
-        """计算各个方向的二阶偏导数 (∂²f/∂x², ∂²f/∂y², ∂²f/∂z²)"""
+        """计算各个方向的纯二阶导 (∂²f/∂x², ∂²f/∂y², ∂²f/∂z²)"""
+        # 这是为了laplacian项准备的二阶导数计算函数，返回一个包含三个分量的数组，
+        # 每个分量对应一个空间方向的二阶导数。
+        # 并不是Hessian矩阵
         ax, ay, az = FiniteDifference._get_axes(cx, cy, cz)
         
         def _second_deriv(field):
@@ -166,8 +203,8 @@ class TurbidityCurrentAnalyzer:
     def __init__(self):
         # self.sol = '/media/amber/53EA-E81F/PhD/case231020_5'
         # self.output_dir = "/home/amber/postpro/u_vorticity/tc3d_d23_orginal"
-        self.sol = '/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Middle_particle23/3D/case230209_2'
-        self.output_dir = "/home/amber/postpro/u_vorticity/tc3d_d23_0209_2"
+        self.sol = '/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Middle_particle23/NEW/case230311_1'
+        self.output_dir = "/home/amber/postpro/u_vorticity/tc3d_d23_0311_1"
         self.rho_f = 1000.0
         self.times = [15]
         self.z_slice = 0.135         # Z 方向切片位置
@@ -190,128 +227,9 @@ class TurbidityCurrentAnalyzer:
         self.fig_height = 0.3        # 绘图 y 轴上限
         self.cmap = 'coolwarm'       # 较浅且平滑的红蓝配色，视觉更轻快屏柔和
 
-    def _compare_gradients(self, data: TimeStepData):
-        """对比自定义梯度计算与 OpenFOAM 原始数据，分析边界误差"""
-        # 1. 计算我们的梯度 (3, 3, nx, ny, nz)
-        # data.gradUb 现在是 (9, nx, ny, nz)，第 0 轴是 9 个张量分量。
-        # - reshape(3, 3, nx, ny, nz, order='C') 是把这 9 个分量轴拆成两个轴 (3,3)。
-        grad_calc = self.finite_diff.compute_gradient_simple(data.X, data.Y, data.Z, data.Ub)
-        
-        # 2. 这里的 data.gradUb 是 (9, nx, ny, nz)，转为 (3, 3, nx, ny, nz)
-        grad_of = data.gradUb.reshape(3, 3, *data.X.shape, order='C')
-        grad_of_jac = np.swapaxes(grad_of, 0, 1)                       # dU_i/dx_j
-        
+        self.enabale_gradient_comparison = False # 是否启用梯度对比分析
 
-        # 3. 计算整体误差
-        diff = grad_calc - grad_of_jac
-        # diff = grad_calc-grad_of
-        print(f"\n{'='*20} Gradient Verification (t={data.time}) {'='*20}")
-        
-        for i, comp_i in enumerate(['x', 'y', 'z']):
-            for j, comp_j in enumerate(['x', 'y', 'z']):
-                term_of = grad_of[i, j]
-                term_diff = diff[i, j]
-                
-                # 计算 L2 相对误差
-                ref_val = np.linalg.norm(term_of)
-                l2_err = np.linalg.norm(term_diff) / (ref_val + 1e-10)
-                print(f"  dU{comp_i}/d{comp_j}: Relative L2 Error = {l2_err:.4e}")
-        
-        # 4. 边界分析 - 重点查看 y=min (地面) 和 x=max (前端)
-        print(f"\n  Boundary Error Analysis (Mean Absolute Difference):")
-        # 底边界 (y 轴索引 0)
-        y_min_err = np.mean(np.abs(diff[:, :, :, 0, :]))
-        print(f"    - Bottom Boundary (y_min): {y_min_err:.4e}")
-        # 侧边界 (z 轴索引 0 和 -1)
-        z_edge_err = np.mean(np.abs(diff[:, :, :, :, [0, -1]]))
-        print(f"    - Side Boundaries (z_edges): {z_edge_err:.4e}")
-        # 内部点 (排除最外层点)
-        inner_err = np.mean(np.abs(diff[:, :, 1:-1, 1:-1, 1:-1]))
-        print(f"    - Interior Points:         {inner_err:.4e}")
-        print(f"{'='*65}\n")
-
-    def _plot_transport_terms(self, data: TimeStepData, time_v: float, head_x: float):
-        """为每个 L 和 R 项生成 Z 方向切片的云图"""
-        import matplotlib.pyplot as plt
-        
-        # 统一设置字体大小
-        plt.rcParams.update({
-            'font.size': 20,
-            'axes.titlesize': 22,
-            'axes.labelsize': 20,
-            'xtick.labelsize': 20,
-            'ytick.labelsize': 20
-        })
-        
-        plot_dir = os.path.join(self.output_dir, f"plots_t{time_v}")
-        os.makedirs(plot_dir, exist_ok=True)
-        print(f"Generating contour plots in {plot_dir}...")
-        
-        # 1. 找到最近的 Z 切面索引
-        z_idx = np.argmin(np.abs(data.Z[0, 0, :] - self.z_slice))
-        print(f"Selected Z slice at z={data.Z[0, 0, z_idx]:.3f} (index {z_idx}) for plotting")
-        real_z = data.Z[0, 0, z_idx]
-        
-        # 2. 提取切面网格
-        X_slice = data.X[:, :, z_idx]
-        Y_slice = data.Y[:, :, z_idx]
-        alpha_slice = data.alpha_A[:, :, z_idx]
-        
-        # 3. 准备所有待绘制的项 (包括总和项)
-        L_total = np.zeros_like(data.vorticityUb)
-        for k, v in data.L_terms.items():
-            if k != 'L0': L_total += v
-            
-        R_total = np.zeros_like(data.vorticityUb)
-        for v in data.R_terms.values():
-            R_total += v
-            
-        all_plots = {**data.L_terms, **data.R_terms, 'L_sum': L_total, 'R_sum': R_total}
-        
-        for name, field in all_plots.items():
-            # 跳过验证项 L0 的绘图 (速度梯度矩阵)
-            if name == 'L0':
-                continue
-                
-            # 提取数据：如果是向量 (3, nx, ny, nz) 则取 Z 分量 [2]观察那些“绕着 z 轴转”的涡量（即垂直于平面的旋转强度）。
-            if field.ndim == 4:
-                plot_val = field[2, :, :, z_idx]
-                title_suffix = "(Z-component)"
-            else:
-                plot_val = field[:, :, z_idx]
-                title_suffix = "(Scalar)"
-                
-            plt.figure(figsize=self.FIG_SIZE) # 稍微收紧比例
-            
-            # 排除极值干扰设置对比度
-            vlimit = np.percentile(np.abs(plot_val), 98) 
-            if vlimit == 0: vlimit = 1e-10
-            
-            # 使用 contourf 代替 pcolormesh，增加 levels 使其平滑
-            # levels=100 会产生非常细腻且清晰的等值线填充
-            levels = np.linspace(-vlimit, vlimit, 101)
-            
-            im = plt.contourf(X_slice, Y_slice, plot_val, 
-                             levels=levels,
-                             cmap=self.cmap,
-                             extend='both')
-            plt.contour(X_slice, Y_slice, alpha_slice, **self.ALPHA_CONTOUR_PARAMS)
-            # 添加颜色条
-            plt.colorbar(im, label='Value', aspect=20)
-            
-            plt.xlim(*self.X_LIM)
-            plt.ylim(*self.Y_LIM)
-            plt.title(f"{name} {title_suffix} at t={time_v}, z={real_z:.3f}")
-            plt.xlabel('x (m)')
-            plt.ylabel('y (m)')
-            
-            # 提高保存清晰度到 300 DPI
-            save_name = os.path.join(plot_dir, f"contour_{name}.png")
-            plt.savefig(save_name, dpi=300, bbox_inches='tight')
-            plt.close()
-            
-        print(f"All plots saved for t={time_v}")
-
+    
     def _locate_head_position(self, X: np.ndarray, Y: np.ndarray, alpha_A: np.ndarray) -> float:
         """从流向末端向前搜索，定位头部第一个满足阈值的 x 坐标"""
         # X 维度为 (nx, ny, nz)，获取唯一的 x 轴坐标并倒序
@@ -323,77 +241,17 @@ class TurbidityCurrentAnalyzer:
                 return x
         return np.max(X) # 没找到则返回最大值
 
-    def _compute_L_terms(self, data: TimeStepData) -> Dict[str, np.ndarray]:
-        """计算涡量输运方程左端项"""
-        # L0: 使用 FiniteDifference 计算的速度梯度 (3, 3, nx, ny, nz) 用于验证项
-        L0 = self.finite_diff.compute_gradient_simple(data.X, data.Y, data.Z, data.Ub)
+    def _compute_gradUb(self, data: TimeStepData) -> np.ndarray:
+        """统一计算速度梯度，供 L/R 项复用。"""
+        return self.finite_diff.compute_gradient_simple(data.X, data.Y, data.Z, data.Ub)
 
-        # L1: 密度梯度跟动能梯度的叉乘
-        gradmagUb = self.finite_diff.compute_gradient_simple(data.X, data.Y, data.Z, data.magUb)
-        gradke = gradmagUb * data.magUb[np.newaxis, ...] # grad(0.5*|U|^2) = U · grad(U)
-        L1 = self.vector_calc.cross_product(data.gradbeta, gradke) * self.rho_f
-        
-        # L2: Lamb向量与密度梯度的叉乘
-        lamb = self.vector_calc.cross_product(data.Ub, data.vorticityUb)
-        L2 = self.vector_calc.cross_product(lamb, data.gradbeta) * self.rho_f
-        
-        # L3: 涡量拉伸项 (Tensor contraction)
-        L3 = self.vector_calc.tensor_vector_contraction(data.gradUb, data.vorticityUb) * data.beta * self.rho_f
-        
-        # L4: ρ * β * (U_a · ∇)ω
-        grad_vortUb = self.finite_diff.compute_gradient_simple(data.X, data.Y, data.Z, data.vorticityUb)
-        L4 = self.vector_calc.tensor_vector_contraction(grad_vortUb, data.Ua) * data.beta * self.rho_f
-        
-        # L5: 压缩项 (Vorticity * Divergence)
-        divUb = self.vector_calc.divergence(data.gradUb)
-        L5 = data.beta * data.vorticityUb * divUb[np.newaxis, ...] * self.rho_f
-        
-        return {'L0': L0, 'L1': L1, 'L2': L2, 'L3': L3, 'L4': L4, 'L5': L5}
+    def _compute_L_terms(self, data: TimeStepData, gradUb: np.ndarray) -> Dict[str, np.ndarray]:
+        """计算涡量输运方程左端项。"""
+        return compute_l_terms(data, gradUb, self.finite_diff, self.vector_calc, self.rho_f)
 
-    def _compute_R_terms(self, data: TimeStepData) -> Dict[str, np.ndarray]:
-        """计算扩散和粘性相关项"""
-        # R1: 扩散项 beta * nueff * laplacian(vorticity)
-        lap_vort = self.finite_diff.compute_laplacian_simple(data.X, data.Y, data.Z, data.vorticityUb)
-        R1 = data.beta * lap_vort * self.rho_f * data.nuEffb
-
-        # R2: 粘性项 (grad(nuEff) · laplacian(Ub))
-        betanuEff = data.beta * data.nuEffb
-        grad_betanuEff = self.finite_diff.compute_gradient_simple(data.X, data.Y, data.Z, betanuEff)
-        lap_Ub = self.finite_diff.compute_laplacian_simple(data.X, data.Y, data.Z, data.Ub)
-        R2 = self.vector_calc.cross_product(grad_betanuEff, lap_Ub) * self.rho_f
-        
-        # R3 curl of (grad(betanuEff) · grad(Ub))
-        gradUb_tensor = self.finite_diff.compute_gradient_simple(data.X, data.Y, data.Z, data.Ub)
-        # 这里的 dotGradient 应为向量 (3, nx, ny, nz)
-        # 计算 (grad_betanuEff · ∇) Ub_i
-        dotGradient = self.vector_calc.tensor_vector_contraction(gradUb_tensor, grad_betanuEff) * self.rho_f    
-        R3 = self.finite_diff.compute_vorticity_simple(data.X, data.Y, data.Z, dotGradient)
-
-        # R4 baroclinic effect (grad(nuEff) x grad(div(Ub)))
-        divUb = self.vector_calc.divergence(data.gradUb)
-        # 确保 divUb 是 (nx, ny, nz) 
-        if divUb.ndim == 4 and divUb.shape[0] == 1:
-            divUb = divUb[0]
-        gradDiv = self.finite_diff.compute_gradient_simple(data.X, data.Y, data.Z, divUb)
-        R4 = self.vector_calc.cross_product(grad_betanuEff, gradDiv) * self.rho_f
-
-        # R5 curl of gradient of alpha.b as move with the flow
-        g = grad_betanuEff
-        grad_g = self.finite_diff.compute_gradient_simple(data.X, data.Y, data.Z, g)
-        # grad_g 是 (3, 3, nx, ny, nz), data.Ub 是 (3, nx, ny, nz)
-        grad_gUb = self.vector_calc.tensor_vector_contraction(grad_g, data.Ub) * self.rho_f
-        R5 = self.finite_diff.compute_vorticity_simple(data.X, data.Y, data.Z, grad_gUb)
-
-        # R6 vorticity difference due to drag force: beta * K * (omega_a - omega_b)
-        vorticity_diff = data.vorticityUa - data.vorticityUb
-        R6 = data.beta * vorticity_diff * data.gamma * self.rho_f
-
-        # R7 velocity difference due to drag force: K * grad(beta) x (Ua - Ub)
-        velocity_diff = data.Ua - data.Ub
-        grad_Beta = self.finite_diff.compute_gradient_simple(data.X, data.Y, data.Z, data.beta)
-        R7 = self.vector_calc.cross_product(grad_Beta, velocity_diff) * data.gamma * self.rho_f
-
-        return {'R1': R1, 'R2': R2, 'R3': R3, 'R4': R4, 'R5': R5, 'R6': R6, 'R7': R7}
+    def _compute_R_terms(self, data: TimeStepData, gradUb: np.ndarray) -> Dict[str, np.ndarray]:
+        """计算扩散和粘性相关项。"""
+        return compute_r_terms(data, gradUb, self.finite_diff, self.vector_calc, self.rho_f)
     
     def _save_to_csv(self, data: TimeStepData, time_v: float, head_x: float):
         """将结构化计算结果打平并保存为 CSV，包含 L 和 R 的总和，且只保留 x <= head_x 且 z == z_slice 的部分"""
@@ -452,12 +310,18 @@ class TurbidityCurrentAnalyzer:
             'alpha.b': fluidfoam.readscalar(self.sol, str(time_v), "alpha.b"),
             'vorticityUa': fluidfoam.readvector(self.sol, str(time_v), "vorticity_Ua"),
             'vorticityUb':fluidfoam.readvector(self.sol, str(time_v), "vorticity_Ub"),
-            'gradUb': fluidfoam.readtensor(self.sol, str(time_v), "grad(U.b)"),
             'gradBeta': fluidfoam.readvector(self.sol, str(time_v), "grad(alpha.b)"),
             'nuEffb': fluidfoam.readscalar(self.sol, str(time_v), "nuEffb"),
             'magUb': fluidfoam.readscalar(self.sol, str(time_v), "mag(U.b)"),
             'gamma': fluidfoam.readscalar(self.sol, str(time_v), "K")
         }
+
+        gradUb_raw = None
+        try:
+            gradUb_raw = fluidfoam.readtensor(self.sol, str(time_v), "grad(U.b)")
+            print("grad(U.b) found: using OpenFOAM gradient data for diagnostics.")
+        except Exception:
+            print("grad(U.b) not found: fallback to numerical gradient, continuing analysis.")
         
         nx, ny, nz = len(np.unique(X_raw)), len(np.unique(Y_raw)), len(np.unique(Z_raw))
         sort_idx = np.lexsort((Z_raw, Y_raw, X_raw))
@@ -467,17 +331,30 @@ class TurbidityCurrentAnalyzer:
             if field.ndim == 1: return field[sort_idx].reshape(nx, ny, nz)
             return field[:, sort_idx].reshape(field.shape[0], nx, ny, nz)
 
+        X = reshape_f(X_raw)
+        Y = reshape_f(Y_raw)
+        Z = reshape_f(Z_raw)
+        Ua = reshape_f(raw['U.a'])
+        Ub = reshape_f(raw['U.b'])
+
+        # 如果不存在 OpenFOAM 输出的 grad(U.b)，则回退到本程序数值梯度。
+        if gradUb_raw is not None:
+            gradUb_data = reshape_f(gradUb_raw)
+        else:
+            gradUb_num = self.finite_diff.compute_gradient_simple(X, Y, Z, Ub)  # (3,3,nx,ny,nz)
+            gradUb_data = np.swapaxes(gradUb_num, 0, 1).reshape(9, *X.shape, order='C')
+
         data = TimeStepData(
             time=float(time_v),
-            X=reshape_f(X_raw), Y=reshape_f(Y_raw), 
-            Z=reshape_f(Z_raw),
+            X=X, Y=Y, 
+            Z=Z,
             alpha_A=reshape_f(raw['alpha.a']), 
             beta=reshape_f(raw['alpha.b']),
-            Ua=reshape_f(raw['U.a']), 
-            Ub=reshape_f(raw['U.b']),
+            Ua=Ua, 
+            Ub=Ub,
             vorticityUa=reshape_f(raw['vorticityUa']),
             vorticityUb=reshape_f(raw['vorticityUb']),
-            gradUb=reshape_f(raw['gradUb']),
+            gradUb=gradUb_data,
             gradbeta=reshape_f(raw['gradBeta']),
             nuEffb=reshape_f(raw['nuEffb']),
             magUb=reshape_f(raw['magUb']),
@@ -485,20 +362,22 @@ class TurbidityCurrentAnalyzer:
         )
 
         # 2. 计算输运项
-        data.L_terms = self._compute_L_terms(data)
-        data.R_terms = self._compute_R_terms(data)
+        gradUb = self._compute_gradUb(data)
+        data.L_terms = self._compute_L_terms(data, gradUb)
+        data.R_terms = self._compute_R_terms(data, gradUb)
         
         # 3. 定位头部并输出数据
         head_x = self._locate_head_position(data.X, data.Y, data.alpha_A)
         
         # 输出验证信息: 自定义速度梯度 vs OpenFOAM 速度梯度
-        self._compare_gradients(data)
+        if self.enabale_gradient_comparison:
+            compare_gradients(data, self.finite_diff)
         
         # 保存 CSV
         self._save_to_csv(data, time_v, head_x)
         
         # 绘制云图
-        self._plot_transport_terms(data, time_v, head_x)
+        plot_transport_terms(self, data, time_v, head_x)
         
         return data
 
