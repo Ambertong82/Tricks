@@ -6,10 +6,10 @@ from scipy.interpolate import griddata
 import matplotlib.pyplot as plt
 from scipy.ndimage import gaussian_filter
 from matplotlib.colors import TwoSlopeNorm
-from vorticity_transport.diagnostics import compare_gradients
-from vorticity_transport.plotting import plot_transport_terms
-from vorticity_transport.compute_l_terms import compute_l_terms
-from vorticity_transport.compute_r_terms import compute_r_terms
+from diagnostics import compare_gradients
+from plotting import plot_transport_terms
+from compute_l_terms import compute_l_terms
+from compute_r_terms import compute_r_terms
 # from sklearn.decomposition import PCA
 from typing import Dict, List, Tuple, Optional, Union
 from dataclasses import dataclass
@@ -203,13 +203,15 @@ class TurbidityCurrentAnalyzer:
     def __init__(self):
         # self.sol = '/media/amber/53EA-E81F/PhD/case231020_5'
         # self.output_dir = "/home/amber/postpro/u_vorticity/tc3d_d23_orginal"
-        self.sol = '/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Middle_particle23/NEW/case230311_1'
-        self.output_dir = "/home/amber/postpro/u_vorticity/tc3d_d23_0311_1"
+        self.sol = '/media/amber/PhD_TC/Turbidity_current/Bonnecaze/Middle_particle23/case230311_2'
+        self.output_dir = "/home/amber/postpro/u_vorticity/tc3d_d23_0311_2"
         self.rho_f = 1000.0
-        self.times = [15]
-        self.z_slice = 0.135         # Z 方向切片位置
+        self.times = [25,34]
+        self.prev_dt = 0.5            # ddt 使用的固定时间间隔: 上一时刻 = 当前时刻 - 0.5s
+        self.z_slice = 0.135         # 兼容保留: 旧版切片逻辑使用，当前流程改为 spanwise average
         self.alpha_threshold = 1e-4  # 用于定义头部的阈值
         self.y_min = 0.01            # 避免底边界干扰
+        self.x_min = 0.08         # 避免近头部过于剧烈的梯度干扰
         self.vector_calc = VectorCalculus()
         self.finite_diff = FiniteDifference()
         self.ALPHA_CONTOUR_PARAMS = {
@@ -219,7 +221,7 @@ class TurbidityCurrentAnalyzer:
             'linestyles': 'dashed',
             'zorder': 3
         }
-        self.X_LIM = (0.0, 4.0)
+        self.X_LIM = (0.0, 3.0)
         self.Y_LIM = (0.0, 0.3)
         self.FIG_SIZE = (40, 8)
         
@@ -228,6 +230,38 @@ class TurbidityCurrentAnalyzer:
         self.cmap = 'coolwarm'       # 较浅且平滑的红蓝配色，视觉更轻快屏柔和
 
         self.enabale_gradient_comparison = False # 是否启用梯度对比分析
+
+    @staticmethod
+    def _time_to_dir_name(time_v: float) -> str:
+        """将时间格式化为 OpenFOAM 目录名（如 15, 15.5, 16.25）。"""
+        return f"{float(time_v):g}"
+
+    def _compute_omega_mom_for_time(self, X_raw, Y_raw, Z_raw, time_v: float) -> Optional[np.ndarray]:
+        """读取指定时刻并计算 omega_mom = curl(rho_f * beta * Ub)。"""
+        time_dir = self._time_to_dir_name(time_v)
+        try:
+            ub_raw = fluidfoam.readvector(self.sol, time_dir, "U.b")
+            beta_raw = fluidfoam.readscalar(self.sol, time_dir, "alpha.b")
+        except Exception as exc:
+            print(f"Previous time data missing at t={time_dir}, skip ddt for this step: {exc}")
+            return None
+
+        nx, ny, nz = len(np.unique(X_raw)), len(np.unique(Y_raw)), len(np.unique(Z_raw))
+        sort_idx = np.lexsort((Z_raw, Y_raw, X_raw))
+
+        def reshape_f(field):
+            if field.ndim == 1:
+                return field[sort_idx].reshape(nx, ny, nz)
+            return field[:, sort_idx].reshape(field.shape[0], nx, ny, nz)
+
+        X = reshape_f(X_raw)
+        Y = reshape_f(Y_raw)
+        Z = reshape_f(Z_raw)
+        Ub = reshape_f(ub_raw)
+        beta = reshape_f(beta_raw)
+
+        momentum = Ub * beta * self.rho_f
+        return self.finite_diff.compute_vorticity_simple(X, Y, Z, momentum)
 
     
     def _locate_head_position(self, X: np.ndarray, Y: np.ndarray, alpha_A: np.ndarray) -> float:
@@ -245,34 +279,47 @@ class TurbidityCurrentAnalyzer:
         """统一计算速度梯度，供 L/R 项复用。"""
         return self.finite_diff.compute_gradient_simple(data.X, data.Y, data.Z, data.Ub)
 
-    def _compute_L_terms(self, data: TimeStepData, gradUb: np.ndarray) -> Dict[str, np.ndarray]:
+    def _compute_L_terms(
+        self,
+        data: TimeStepData,
+        gradUb: np.ndarray,
+        prev_omega_mom: Optional[np.ndarray],
+        dt: Optional[float],
+    ) -> Tuple[Dict[str, np.ndarray], np.ndarray]:
         """计算涡量输运方程左端项。"""
-        return compute_l_terms(data, gradUb, self.finite_diff, self.vector_calc, self.rho_f)
+        return compute_l_terms(
+            data,
+            gradUb,
+            self.finite_diff,
+            self.vector_calc,
+            self.rho_f,
+            prev_omega_mom=prev_omega_mom,
+            dt=dt,
+        )
 
     def _compute_R_terms(self, data: TimeStepData, gradUb: np.ndarray) -> Dict[str, np.ndarray]:
         """计算扩散和粘性相关项。"""
         return compute_r_terms(data, gradUb, self.finite_diff, self.vector_calc, self.rho_f)
     
     def _save_to_csv(self, data: TimeStepData, time_v: float, head_x: float):
-        """将结构化计算结果打平并保存为 CSV，包含 L 和 R 的总和，且只保留 x <= head_x 且 z == z_slice 的部分"""
+        """将结果做 spanwise average (沿 z 平均) 后保存为 CSV，并只保留 x <= head_x 的区域。"""
         out_path = os.path.join(self.output_dir, f"vorticity_transport_{time_v}.csv")
-        
-        # 找到最近的实际 Z 坐标以确保 mask 不为空
-        z_idx = np.argmin(np.abs(data.Z[0, 0, :] - self.z_slice))
-        real_z = data.Z[0, 0, z_idx]
-        
-        # 使用找到的实际 z 坐标进行过滤
-        mask = (data.X <= head_x) & (data.Z == real_z)
-        
+
+        # 坐标先做 z 向平均, 得到统一 2D (x,y) 平面
+        X_avg = np.mean(data.X, axis=2)
+        Y_avg = np.mean(data.Y, axis=2)
+
+        # 仅保留头部之前区域
+        mask = (X_avg <= head_x) & (Y_avg >= self.y_min) & (X_avg >= self.x_min)
+
         if not np.any(mask):
-            print(f"Warning: No data found for z={real_z:.3f} and x<={head_x}")
+            print(f"Warning: No spanwise-averaged data found for x<={head_x}")
             return
             
         # 基础坐标
         export_data = {
-            'x': data.X[mask],
-            'y': data.Y[mask],
-            'z': data.Z[mask]
+            'x': X_avg[mask],
+            'y': Y_avg[mask],
         }
         
         # 2. 计算 L 总和与 R 总和 (L0 是验证项，通常不计入方程总和)
@@ -284,41 +331,48 @@ class TurbidityCurrentAnalyzer:
         for v in data.R_terms.values():
             R_total += v
             
-        # 3. 合并所有计算项并由于 mask 展平
-        all_terms = {**data.L_terms, **data.R_terms, 'L_sum': L_total, 'R_sum': R_total}
+        DDT_term = np.zeros_like(data.vorticityUb)
+        for k, v in data.L_terms.items():
+            if k == 'L4' or k == 'L_ddt_omega_mom': # 这两个项通常较小且更依赖数值精度，单独输出以便分析
+                DDT_term += v
+            
+        # 3. 合并所有计算项, 先做 spanwise average, 再按 mask 展平
+        all_terms = {**data.L_terms, **data.R_terms, 'L_sum': L_total, 'R_sum': R_total, 'Residual': L_total - R_total, 'DDT_term': DDT_term }
         
         for name, field in all_terms.items():
             if field.ndim == 3: # 标量 (nx, ny, nz)
-                export_data[name] = field[mask]
+                field_avg = np.mean(field, axis=2)
+                export_data[name] = field_avg[mask]
             elif field.ndim == 4: # 向量 (3, nx, ny, nz)
-                export_data[f"{name}_x"] = field[0][mask]
-                export_data[f"{name}_y"] = field[1][mask]
-                export_data[f"{name}_z"] = field[2][mask]
+                export_data[f"{name}_x"] = np.mean(field[0], axis=2)[mask]
+                export_data[f"{name}_y"] = np.mean(field[1], axis=2)[mask]
+                export_data[f"{name}_z"] = np.mean(field[2], axis=2)[mask]
         
         # 4. 保存
         df = pd.DataFrame(export_data)
         df.to_csv(out_path, index=False)
         print(f"Results (up to x={head_x:.3f}) saved to CSV: {out_path}")
 
-    def process_time_step(self, X_raw, Y_raw, Z_raw, time_v):
+    def process_time_step(self, X_raw, Y_raw, Z_raw, time_v, prev_omega_mom=None, dt=None):
         # 1. 加载并排序重构数据
         print(f"Processing t={time_v}...")
+        time_dir = self._time_to_dir_name(time_v)
         raw = {
-            'U.a': fluidfoam.readvector(self.sol, str(time_v), "U.a"),
-            'U.b': fluidfoam.readvector(self.sol, str(time_v), "U.b"),
-            'alpha.a': fluidfoam.readscalar(self.sol, str(time_v), "alpha.a"),
-            'alpha.b': fluidfoam.readscalar(self.sol, str(time_v), "alpha.b"),
-            'vorticityUa': fluidfoam.readvector(self.sol, str(time_v), "vorticity_Ua"),
-            'vorticityUb':fluidfoam.readvector(self.sol, str(time_v), "vorticity_Ub"),
-            'gradBeta': fluidfoam.readvector(self.sol, str(time_v), "grad(alpha.b)"),
-            'nuEffb': fluidfoam.readscalar(self.sol, str(time_v), "nuEffb"),
-            'magUb': fluidfoam.readscalar(self.sol, str(time_v), "mag(U.b)"),
-            'gamma': fluidfoam.readscalar(self.sol, str(time_v), "K")
+            'U.a': fluidfoam.readvector(self.sol, time_dir, "U.a"),
+            'U.b': fluidfoam.readvector(self.sol, time_dir, "U.b"),
+            'alpha.a': fluidfoam.readscalar(self.sol, time_dir, "alpha.a"),
+            'alpha.b': fluidfoam.readscalar(self.sol, time_dir, "alpha.b"),
+            'vorticityUa': fluidfoam.readvector(self.sol, time_dir, "vorticity_Ua"),
+            'vorticityUb':fluidfoam.readvector(self.sol, time_dir, "vorticity_Ub"),
+            'gradBeta': fluidfoam.readvector(self.sol, time_dir, "grad(alpha.b)"),
+            'nuEffb': fluidfoam.readscalar(self.sol, time_dir, "nuEffb"),
+            'magUb': fluidfoam.readscalar(self.sol, time_dir, "mag(U.b)"),
+            'gamma': fluidfoam.readscalar(self.sol, time_dir, "K")
         }
 
         gradUb_raw = None
         try:
-            gradUb_raw = fluidfoam.readtensor(self.sol, str(time_v), "grad(U.b)")
+            gradUb_raw = fluidfoam.readtensor(self.sol, time_dir, "grad(U.b)")
             print("grad(U.b) found: using OpenFOAM gradient data for diagnostics.")
         except Exception:
             print("grad(U.b) not found: fallback to numerical gradient, continuing analysis.")
@@ -363,7 +417,7 @@ class TurbidityCurrentAnalyzer:
 
         # 2. 计算输运项
         gradUb = self._compute_gradUb(data)
-        data.L_terms = self._compute_L_terms(data, gradUb)
+        data.L_terms, omega_mom = self._compute_L_terms(data, gradUb, prev_omega_mom, dt)
         data.R_terms = self._compute_R_terms(data, gradUb)
         
         # 3. 定位头部并输出数据
@@ -379,13 +433,17 @@ class TurbidityCurrentAnalyzer:
         # 绘制云图
         plot_transport_terms(self, data, time_v, head_x)
         
-        return data
+        return data, omega_mom
 
     def run_analysis(self):
         os.makedirs(self.output_dir, exist_ok=True)
         X, Y, Z = fluidfoam.readmesh(self.sol)
         for t in self.times:
-            self.process_time_step(X, Y, Z, t)
+            t_float = float(t)
+            prev_t = t_float - self.prev_dt
+            prev_omega_mom = self._compute_omega_mom_for_time(X, Y, Z, prev_t)
+            dt = self.prev_dt if prev_omega_mom is not None else None
+            self.process_time_step(X, Y, Z, t_float, prev_omega_mom, dt)
 
 if __name__ == "__main__":
     analyzer = TurbidityCurrentAnalyzer()
