@@ -58,12 +58,12 @@ class TurbidityCurrentAnalyzer:
         self.save_curve_csv = True
         self.save_curve_png = True
         self.curve_groups = {
-            "ddt": ["ddt1", "ddt2", "ddt3"],
-            "advection": ["advection1", "advection2", "advection3", "advection4", "advection5"],
-            "diffusion": ["viscous_diffusion1", "viscous_diffusion2", "viscous_diffusion3", "viscous_diffusion4", "viscous_diffusion5"],
-            "drag": ["drag1", "drag2", "drag3"],
-            "gravity": ["gravity1"],
-            "pressure": ["pressure1"],
+            r"TEND": ["ddt1", "ddt2", "ddt3"],
+            r"ADV": ["advection1", "advection2", "advection3", "advection4", "advection5"],
+            r"DIFF": ["viscous_diffusion1", "viscous_diffusion2", "viscous_diffusion3", "viscous_diffusion4", "viscous_diffusion5"],
+            r"DRAG": ["drag1", "drag2", "drag3"],
+            r"GRAVITY": ["gravity1"],
+            r"PRESSURE": ["pressure1"],
         }
         self.robust_percentile = (1.0, 99.0)
         self.advection_percentile = (3.0, 92.0)
@@ -310,7 +310,14 @@ class TurbidityCurrentAnalyzer:
 
                 fig, ax = plt.subplots(figsize=self.curve_fig_size)
                 for col in cols:
-                    ax.plot(df_plot["x_dime"], df_plot[col], linewidth=self.curve_lw, label=col)
+                    short_name = col[: -len(suffix)] if suffix else col
+                    if suffix == "_avg":
+                        label = rf"$\langle {short_name} \rangle_d$"
+                    elif suffix == "_integral":
+                        label = rf"${short_name}_{{int}}$"
+                    else:
+                        label = col
+                    ax.plot(df_plot["x_dime"], df_plot[col], linewidth=self.curve_lw, label=label)
 
                 ax.set_title(f"{group_name.capitalize()} Terms ({title_part}) at t={time_dir}", fontsize=22)
                 ax.set_xlabel(rf"$(x_f-x)/{self.head_x_scale}$", fontsize=20)
