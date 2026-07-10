@@ -16,17 +16,20 @@ class FrontSample:
 class FrontSpeedExtractor:
     def __init__(self):
         # OpenFOAM case directory.
-        self.sol = "/media/amber/PhD_TC/Turbidity_current/Bonnecaze/Middle_particle23/case230428_5"
-        # self.sol = "/media/amber/PhD_TC/Turbidity_current/Bonnecaze/FIne_particle9/case090428_10"
+        self.sol = "/media/amber/PhD_TC/Turbidity_current/Bonnecaze/Middle_particle23/case230704_2"
+        # self.sol = "/media/amber/PhD_TC/Turbidity_current/Bonnecaze/FIne_particle9/2d/case090604_2"
+        # self.sol = "/media/amber/PhD_TC/Turbidity_current/Bonnecaze/Middle_particle23/2D/case230604_2"
+        # self.sol = "/media/amber/PhD_TC/Turbidity_current/Bonnecaze/Middle_particle23/mesh_convergence/case230504_2"
+        # self.sol = "/media/amber/PhD_TC/Turbidity_current/Bonnecaze/FIne_particle9/case090704_2"
         
 
         # Output CSV path.
         self.output_dir = "/home/amber/postpro/frontposition_turbidity"
-        self.output_csv = os.path.join(self.output_dir, "front_speed_2davg_230428_5.csv")
+        self.output_csv = os.path.join(self.output_dir, "front_speed_2davg_230704_2_1e-5.csv")
 
         # Time list to process.
-        # self.times = np.arange(1, 37, 0.5)
-        self.times = [5,10,15,20,25,30,35,40]
+        self.times = np.arange(1, 40, 0.5)
+        # self.times = [5,10,15,20,25,30,35,40]
 
         # Field names and threshold.
         self.alpha_field = "alpha.a"

@@ -6,6 +6,15 @@ import fluidfoam
 import matplotlib.pyplot as plt
 import numpy as np
 
+# Use Times New Roman for all plot text
+plt.rcParams['font.family'] = 'serif'
+plt.rcParams['font.serif'] = ['Times New Roman']
+# Make math text use Times New Roman as well (mathtext custom)
+plt.rcParams['mathtext.fontset'] = 'custom'
+plt.rcParams['mathtext.rm'] = 'Times New Roman'
+plt.rcParams['mathtext.it'] = 'Times New Roman:italic'
+plt.rcParams['mathtext.bf'] = 'Times New Roman:bold'
+
 
 @dataclass
 class TimeStepVelocity3D:
@@ -24,34 +33,35 @@ class TimeStepVelocity3D:
 class VelocityStreamlineAnalyzer:
     def __init__(self):
         # OpenFOAM case directory and output directory.
-        # self.sol = "/media/amber/PhD_TC/Turbidity_current/Bonnecaze/Middle_particle23/case230311_1"
-        # self.output_dir = "/home/amber/postpro/velocity_streamline/tc3d_d23_0327_1"
-        self.sol = "/media/amber/PhD_TC/Turbidity_current/Bonnecaze/FIne_particle9/case090327_11"
-        self.output_dir = "/home/amber/postpro/velocity_streamline/tc3d_d09_0327_1"
-        self.times = [15,25]
+        self.sol = "/media/amber/PhD_TC/Turbidity_current/Bonnecaze/Middle_particle23/case230428_4test"
+        self.output_dir = "/home/amber/postpro/velocity_streamline/tc3d_d23_428_4test"
+        # self.sol = "/media/amber/PhD_TC/Turbidity_current/Bonnecaze/FIne_particle9/case090327_12"
+        # self.output_dir = "/home/amber/postpro/velocity_streamline/tc3d_d09_0327_12"
+        self.times = [0.5,2,5,15,25]
 
         # alpha.a threshold for current head detection.
         self.alpha_threshold = 1e-5
         # Characteristic height for non-dimensional x.
         self.H = 0.3
         # Velocity field name in OpenFOAM.
-        self.velocity_field = "U.b"
+        self.velocity_field = "U.a"
 
         # Plot style.
-        self.fig_size = (15, 3)
-        self.stream_density = 1.5
-        self.stream_linewidth = 1.2
-        self.stream_arrowsize = 1.2
+        self.fig_size = (20, 10)
+        self.stream_density = 1.0
+        self.stream_linewidth = 2.0
+        self.stream_arrowsize = 2.0
         self.speed_percentile = (1.0, 99.0)
         self.dx_stream = 0.004
         self.dy_stream = 0.001
-        self.cmap = "coolwarm"
+        self.cmap = "gray_r"
+        self.streamc = "cornflowerblue"
         # Font sizes (customize these to change plot fonts)
-        self.title_fontsize = 12
-        self.label_fontsize = 12
-        self.tick_fontsize = 10
-        self.cbar_labelsize = 10
-        self.cbar_ticksize = 10
+        self.title_fontsize = 28
+        self.label_fontsize = 52
+        self.tick_fontsize = 50
+        self.cbar_labelsize = 52
+        self.cbar_ticksize = 50
 
     @staticmethod
     def _time_to_dir_name(time_v: float) -> str:
@@ -292,18 +302,29 @@ class VelocityStreamlineAnalyzer:
         alpha_plot = np.clip(a_plot, 0.0, 0.01)
 
         fig, ax = plt.subplots(figsize=self.fig_size)
+        # Reserve explicit margins so axis labels and top colorbar are fully visible.
+        fig.subplots_adjust(left=0.08, right=0.985, bottom=0.20, top=0.80)
         cf = ax.contourf(
             xx,
             yy,
             alpha_plot,
             levels=np.linspace(0, 0.01, 121),
-            cmap="coolwarm",
+            cmap=self.cmap,
             extend="neither",
         )
-        cbar = fig.colorbar(cf, ax=ax, ticks=[0.0, 0.0025, 0.005, 0.0075, 0.01])
-        cbar.set_label("alpha.a", fontsize=self.cbar_labelsize)
-        cbar.ax.tick_params(labelsize=self.cbar_ticksize)
-        cbar.set_ticklabels(["0", "0.0025", "0.005","0.0075","0.01"])
+        # Place colorbar at the very top of the figure (not inside data axes).
+        # cax = fig.add_axes([0.30, 1.0, 0.47, 0.045])
+        # cbar = fig.colorbar(
+        #     cf,
+        #     cax=cax,
+        #     ticks=[0.0, 0.0025, 0.005, 0.0075, 0.01],
+        #     orientation="horizontal",
+        # )
+        # cbar.set_label(r"$\alpha_s$", fontsize=self.cbar_labelsize, labelpad=10)
+        # cbar.ax.tick_params(labelsize=self.cbar_ticksize)
+        # cbar.ax.xaxis.set_ticks_position("bottom")
+        # cbar.ax.xaxis.set_label_position("top")
+        # cbar.set_ticklabels(["0", "0.0025", "0.005", "0.0075", "0.01"])
 
         # Streamlines with arrows
         ax.streamplot(
@@ -312,38 +333,25 @@ class VelocityStreamlineAnalyzer:
             np.ma.masked_invalid(u_stream.T),
             np.ma.masked_invalid(v_stream.T),
             density=self.stream_density,
-            color="gray",
+            color=self.streamc,
             linewidth=self.stream_linewidth,
             arrowsize=self.stream_arrowsize,
         )
 
-        # alpha = 0.01 contour line
-        # alpha_valid = a_plot[np.isfinite(a_plot)]
-        # if alpha_valid.size > 0:
-        #     a_min = float(np.nanmin(alpha_valid))
-        #     a_max = float(np.nanmax(alpha_valid))
-        #     if a_min <= 0.01 <= a_max:
-        #         ax.contour(
-        #             xx,
-        #             yy,
-        #             a_plot,
-        #             levels=[0.01],
-        #             colors="w",
-        #             linestyles="--",
-        #             linewidths=1.2,
-        #             zorder=5,
-        #         )
+    
 
-        ax.set_title(f"Spanwise-Averaged Streamlines at t={time_v:.2f}s", fontsize=self.title_fontsize)
-        ax.set_xlabel(r"$(x_f-x)/H$", fontsize=self.label_fontsize)
-        ax.set_ylabel("y/H", fontsize=self.label_fontsize)
+        # ax.set_title(f"Spanwise-Averaged Streamlines at t={time_v:.2f}s", fontsize=self.title_fontsize)
+        ax.set_xlabel(r"$(x_{\mathrm{front}}-x)/H_0$", fontsize=self.label_fontsize)
+        ax.set_yticks([0.0, 0.5, 1.0])
+        ax.set_ylabel(r"$z*$", fontsize=self.label_fontsize, rotation=0, labelpad=20)
         ax.set_xlim(float(np.max(x_plot)), 0.0)
-        ax.set_ylim(float(np.min(y_vals)), float(np.max(y_vals)))
+        # Force normalized y-axis display to [0, 1] with fixed ticks.
+        ax.set_ylim(0.0, 1.0)
         ax.tick_params(axis="both", labelsize=self.tick_fontsize)
-        fig.tight_layout()
+        # Avoid tight_layout here, otherwise manually placed colorbar can overlap.
 
         out_png = os.path.join(out_dir, f"streamline_spanwise_t{time_v:.2f}.png")
-        fig.savefig(out_png, dpi=300)
+        fig.savefig(out_png, dpi=300, bbox_inches="tight", pad_inches=0.05)
         plt.close(fig)
         print(f"Saved Figure: {out_png}")
 

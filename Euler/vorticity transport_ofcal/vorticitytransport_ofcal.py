@@ -24,19 +24,19 @@ class TurbidityCurrentAnalyzer:
             "ddt1": "Vort_ddt1",
             "ddt2": "Vort_ddt2",
             "ddt3": "Vort_ddt3",
-            "advection1": "Vort_Advection1",
+            "adv1": "Vort_Advection1",
             # "advectioncal1": "Vort_advectioncal1",
-            "advection2": "Vort_Advection2",
-            "advection3": "Vort_Advection3",
-            "advection4": "Vort_Advection4",
+            "adv2": "Vort_Advection2",
+            "adv3": "Vort_Advection3",
+            "adv4": "Vort_Advection4",
             # "advectioncal4": "Vort_Advectioncal4",
-            "advection5": "Vort_Advection5",
-            "viscous_diffusion1": "Vort_Viscous1",
-            "viscous_diffusion2": "Vort_Viscous2",
-            "viscous_diffusion3": "Vort_Viscous3",
-            "viscous_diffusion4": "Vort_Viscous4",
+            "adv5": "Vort_Advection5",
+            "diff1": "Vort_Viscous1",
+            "diff2": "Vort_Viscous2",
+            "diff3": "Vort_Viscous3",
+            "diff4": "Vort_Viscous4",
             # "viscous_diffusioncal4": "Vort_Viscouscal4",
-            "viscous_diffusion5": "Vort_Viscous5",
+            "diff5": "Vort_Viscous5",
             "gravity1": "Vort_Gravity",
             "pressure1": "Vort_P",
             "drag1": "Vort_Drag1",
@@ -45,12 +45,12 @@ class TurbidityCurrentAnalyzer:
             "vorticityUb": "vorticity_Ub",
         }
 
-        self.fig_size = (20, 6)
+        self.fig_size = (30, 12)
         self.cmap = "coolwarm"
         self.n_levels = 121
-        self.x_lim = 4.0
+        self.x_lim = 3.0
         self.y_lim = (0.0, 1.0)
-        self.curve_fig_size = (20, 3.5)
+        self.curve_fig_size = (30, 6)
         self.curve_lw = 2.0
         self.alpha_threshold = 1e-5
         self.head_x_scale = 0.3
@@ -59,11 +59,13 @@ class TurbidityCurrentAnalyzer:
         self.save_curve_png = True
         self.curve_groups = {
             r"TEND": ["ddt1", "ddt2", "ddt3"],
-            r"ADV": ["advection1", "advection2", "advection3", "advection4", "advection5"],
-            r"DIFF": ["viscous_diffusion1", "viscous_diffusion2", "viscous_diffusion3", "viscous_diffusion4", "viscous_diffusion5"],
+            r"ADV": ["adv1", "adv2", "adv3", "adv4", "adv5"],
+            r"DIFF": ["diff1", "diff2", "diff3", "diff4", "diff5"],
             r"DRAG": ["drag1", "drag2", "drag3"],
             r"GRAVITY": ["gravity1"],
             r"PRESSURE": ["pressure1"],
+            # combined gravity + pressure term (added so curves include the sum)
+            r"GRAV+P": ["GP"],
         }
         self.robust_percentile = (1.0, 99.0)
         self.advection_percentile = (3.0, 92.0)
@@ -75,6 +77,11 @@ class TurbidityCurrentAnalyzer:
         self.rhob = 1000
         self.H0 = 0.3
         self.g = 9.81
+        self.label_fontsize = 32
+        self.title_fontsize = 38
+        self.tick_fontsize = 38
+        self.legend_fontsize = 32
+        self.offset_fontsize = 38
 
     @staticmethod
     def _time_to_dir_name(time_v: float) -> str:
@@ -267,6 +274,8 @@ class TurbidityCurrentAnalyzer:
             return
 
         time_dir = self._time_to_dir_name(time_v)
+        # time_v is numeric; compute nondimensional time from numeric value
+        time_dim = float(time_v) * 0.85
         os.makedirs(curve_dir, exist_ok=True)
 
         if self.save_curve_csv:
@@ -311,25 +320,35 @@ class TurbidityCurrentAnalyzer:
                 fig, ax = plt.subplots(figsize=self.curve_fig_size)
                 for col in cols:
                     short_name = col[: -len(suffix)] if suffix else col
+                    # Prefer using the group name (e.g. TEND, ADV) as the legend label
+                    group_label = None
+                    for gname, shorts in self.curve_groups.items():
+                        if short_name in shorts:
+                            group_label = gname
+                            break
+
                     if suffix == "_avg":
+                        base = group_label if group_label is not None else short_name
                         label = rf"$\langle {short_name} \rangle_d$"
                     elif suffix == "_integral":
+                        base = group_label if group_label is not None else short_name
                         label = rf"${short_name}_{{int}}$"
                     else:
-                        label = col
+                        label = group_label if group_label is not None else col
+
                     ax.plot(df_plot["x_dime"], df_plot[col], linewidth=self.curve_lw, label=label)
 
-                ax.set_title(f"{group_name.capitalize()} Terms ({title_part}) at t={time_dir}", fontsize=22)
-                ax.set_xlabel(rf"$(x_f-x)/{self.head_x_scale}$", fontsize=20)
+                ax.set_title(rf"{group_name}  at $t$={time_dim:.2f}", fontsize=self.title_fontsize)
+                ax.set_xlabel(rf"$(x_f-x)/H_0$", fontsize=self.label_fontsize)
                 ax.set_xlim(self.x_lim, 0.0)
-                ax.set_ylabel(ylabel, fontsize=20)
-                ax.tick_params(axis="both", labelsize=18)
+                # ax.set_ylabel(ylabel, fontsize=self.label_fontsize)
+                ax.tick_params(axis="both", labelsize=self.tick_fontsize)
                 ax.grid(True, linestyle="--", alpha=0.35)
                 if suffix != "_height":
                     ax.ticklabel_format(style='sci', axis='y', scilimits=(-1, 3))
                     offset_text = ax.yaxis.get_offset_text()
-                    offset_text.set_fontsize(16)
-                self._legend_if_any(ax, fontsize=14, ncol=3, loc="upper left")
+                    offset_text.set_fontsize(self.offset_fontsize)
+                self._legend_if_any(ax, fontsize=self.legend_fontsize, ncol=3, loc="upper left")
                 fig.tight_layout()
 
                 out_path = os.path.join(curve_dir, f"vorticity_curves_{group_name}_{file_tag}_t{time_dir}.png")
@@ -531,7 +550,7 @@ class TurbidityCurrentAnalyzer:
 
         curve_terms_for_output = dict(curve_terms_2d)
         if gravity1_2d is not None and pressure1_2d is not None:
-            curve_terms_for_output["gravity1_plus_pressure1"] = gravity1_2d + pressure1_2d
+            curve_terms_for_output["GP"] = gravity1_2d + pressure1_2d
 
         if curve_terms_for_output:
             df_curve = self._build_curve_dataframe(x_2d, y_2d, curve_terms_for_output, ubx_2d, head_idx, head_x)

@@ -43,18 +43,18 @@ class TimeStepK3D:
 
 class TKEBudgetAnalyzer:
     def __init__(self):
-        self.sol = "/media/amber/PhD_TC/Turbidity_current/Bonnecaze/FIne_particle9/case090327_11"
-        # self.sol = "/media/amber/PhD_TC/Turbidity_current/Bonnecaze/Middle_particle23/case230327_1"
+        # self.sol = "/media/amber/PhD_TC/Turbidity_current/Bonnecaze/FIne_particle9/case090327_11"
+        self.sol = "/media/amber/PhD_TC/Turbidity_current/Bonnecaze/Middle_particle23/case230428_4"
         # self.sol = "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Fine_particle9/3d/case090311_22"
         # self.sol =  "/media/amber/PhD_data_xtsun/PhD/Bonnecaze/Middle_particle23/NEW/Middle_particle/case230311_2"
 
-        self.output_dir = "/home/amber/postpro/TKE_budget/tc3d_d09_0327_1conservation"
-        # self.output_dir = "/home/amber/postpro/TKE_budget/tc3d_d23_0327_1onservation"
+        # self.output_dir = "/home/amber/postpro/TKE_budget/tc3d_d09_0327_1conservation"
+        self.output_dir = "/home/amber/postpro/TKE_budget/tc3d_d23_0327_1onservation"
         self.times = [15,25,35]
 
         self.alpha_threshold = 1e-5
         self.rho_w = 1000.0
-        self.fig_size = (20, 3)
+        self.fig_size = (30, 6)
         self.X_LIM = (0.0, 2.3)
         self.x_dime_max = 4.0
         self.ri_x_dime_max = 4.0
@@ -68,6 +68,11 @@ class TKEBudgetAnalyzer:
         self.enable_grad_u_compare = True
         self.U= 0.26
         self.H = 0.3
+        self.label_fontsize = 32
+        self.title_fontsize = 38
+        self.tick_fontsize = 38
+        self.legend_fontsize = 32
+        self.offset_fontsize = 38
 
     @staticmethod
     def _time_to_dir_name(time_v: float) -> str:
@@ -460,15 +465,15 @@ class TKEBudgetAnalyzer:
                 label=self._format_plot_label(col),
             )
 
-        ax.set_title(f"TKE Budget LHS Terms (Vertical Average) at {time_label}", fontsize=16)
-        ax.set_xlabel(r'$(x_f-x)/H$', fontsize=14)
+        ax.set_title(f"TKE Budget LHS Terms (Vertical Average) at {time_label}", fontsize=self.title_fontsize)
+        ax.set_xlabel(r'$(x_f-x)/H$', fontsize=self.label_fontsize)
         ax.set_xlim(self.x_dime_max, 0.0)
-        ax.set_ylabel("Vertical average", fontsize=14)
+        ax.set_ylabel("Vertical average", fontsize=self.label_fontsize)
         # ax.set_ylim(self.Y_LIM)
-        ax.tick_params(axis="both", labelsize=12)
+        ax.tick_params(axis="both", labelsize=self.tick_fontsize)
         ax.grid(True, linestyle="--", alpha=0.35)
         if ax.lines:
-            ax.legend(fontsize=10, ncol=2)
+            ax.legend(fontsize=self.legend_fontsize, ncol=2)
         fig.tight_layout()
 
         fig_path = os.path.join(png_dir, f"TKE_Budget_LHS_VAvg_t{time_tag}.png")
@@ -486,15 +491,15 @@ class TKEBudgetAnalyzer:
                     label=self._format_plot_label(col),
                 )
 
-        ax2.set_title(f"Material Derivative and extra Convection Terms at {time_label}", fontsize=16)
-        ax2.set_xlabel(r'$(x_f-x)/H$', fontsize=14)
+        ax2.set_title(f"Material Derivative and extra Convection Terms at {time_label}", fontsize=self.title_fontsize)
+        ax2.set_xlabel(r'$(x_f-x)/H$', fontsize=self.label_fontsize)
         ax2.set_xlim(self.x_dime_max, 0.0)
-        ax2.set_ylabel("Vertical average", fontsize=14)
+        ax2.set_ylabel("Vertical average", fontsize=self.label_fontsize)
         # ax2.set_ylim(self.Y_LIM)
-        ax2.tick_params(axis="both", labelsize=12)
+        ax2.tick_params(axis="both", labelsize=self.tick_fontsize)
         ax2.grid(True, linestyle="--", alpha=0.35)
         if ax2.lines:
-            ax2.legend(fontsize=10, ncol=2)
+            ax2.legend(fontsize=self.legend_fontsize, ncol=2)
         fig2.tight_layout()
 
         fig_path = os.path.join(png_dir, f"Material_Derivative_Convection_t{time_tag}.png")
@@ -511,15 +516,15 @@ class TKEBudgetAnalyzer:
                 label=self._format_plot_label("convection2_avg"),
             )
 
-        ax3.set_title(f"Convection Term (divergence) at {time_label}", fontsize=16)
-        ax3.set_xlabel(r'$(x_f-x)/H$', fontsize=14)
+        ax3.set_title(f"Convection Term (divergence) at {time_label}", fontsize=self.title_fontsize)
+        ax3.set_xlabel(r'$(x_f-x)/H$', fontsize=self.label_fontsize)
         ax3.set_xlim(self.x_dime_max, 0.0)
-        ax3.set_ylabel("Vertical average", fontsize=14)
+        ax3.set_ylabel("Vertical average", fontsize=self.label_fontsize)
         # ax3.set_ylim(self.Y_LIM)
-        ax3.tick_params(axis="both", labelsize=12)
+        ax3.tick_params(axis="both", labelsize=self.tick_fontsize)
         ax3.grid(True, linestyle="--", alpha=0.35)
         if ax3.lines:
-            ax3.legend(fontsize=10, ncol=2)
+            ax3.legend(fontsize=self.legend_fontsize, ncol=2)
         fig3.tight_layout()
 
         fig_path = os.path.join(png_dir, f"TKE_Budget_Convection_t{time_tag}.png")
@@ -537,14 +542,14 @@ class TKEBudgetAnalyzer:
                 label=self._format_plot_label("G_avg"),
             )
 
-        ax4.set_title(f"G Term (Vertical Average) at {time_label}", fontsize=16)
-        ax4.set_xlabel(r'$(x_f-x)/H$', fontsize=14)
+        ax4.set_title(f"G Term (Vertical Average) at {time_label}", fontsize=self.title_fontsize)
+        ax4.set_xlabel(r'$(x_f-x)/H$', fontsize=self.label_fontsize)
         ax4.set_xlim(self.x_dime_max, 0.0)
-        ax4.set_ylabel("Vertical average", fontsize=14)
-        ax4.tick_params(axis="both", labelsize=12)
+        ax4.set_ylabel("Vertical average", fontsize=self.label_fontsize)
+        ax4.tick_params(axis="both", labelsize=self.tick_fontsize)
         ax4.grid(True, linestyle="--", alpha=0.35)
         if ax4.lines:
-            ax4.legend(fontsize=10, ncol=1)
+            ax4.legend(fontsize=self.legend_fontsize, ncol=1)
         fig4.tight_layout()
 
         fig4_path = os.path.join(png_dir, f"TKE_Budget_G_only_t{time_tag}.png")
@@ -560,14 +565,14 @@ class TKEBudgetAnalyzer:
                 linewidth=self.curve_lw,
                 label=self._format_plot_label("k_avg"),
             )
-        ax5.set_title(f"k (Vertical Average) at {time_label}", fontsize=16)
-        ax5.set_xlabel(r'$(x_f-x)/H$', fontsize=14)
+        ax5.set_title(f"k (Vertical Average) at {time_label}", fontsize=self.title_fontsize)
+        ax5.set_xlabel(r'$(x_f-x)/H$', fontsize=self.label_fontsize)
         ax5.set_xlim(self.x_dime_max, 0.0)
-        ax5.set_ylabel("Vertical average", fontsize=14)
-        ax5.tick_params(axis="both", labelsize=12)
+        ax5.set_ylabel("Vertical average", fontsize=self.label_fontsize)
+        ax5.tick_params(axis="both", labelsize=self.tick_fontsize)
         ax5.grid(True, linestyle="--", alpha=0.35)
         if ax5.lines:
-            ax5.legend(fontsize=10, ncol=1)
+            ax5.legend(fontsize=self.legend_fontsize, ncol=1)
         fig5.tight_layout()
 
         fig5_path = os.path.join(png_dir, f"TKE_Budget_k_only_t{time_tag}.png")
@@ -583,14 +588,14 @@ class TKEBudgetAnalyzer:
                 linewidth=self.curve_lw,
                 label=self._format_plot_label("LHS_avg"),
             )
-            ax6.set_title(f"LHS of TKE Budget (Vertical Average) at {time_label}", fontsize=16)
-            ax6.set_xlabel(r'$(x_f-x)/H$', fontsize=14)
+            ax6.set_title(f"LHS of TKE Budget (Vertical Average) at {time_label}", fontsize=self.title_fontsize)
+            ax6.set_xlabel(r'$(x_f-x)/H$', fontsize=self.label_fontsize)
             ax6.set_xlim(self.x_dime_max, 0.0)
-            ax6.set_ylabel("Vertical average", fontsize=14)
-            ax6.tick_params(axis="both", labelsize=12)
+            ax6.set_ylabel("Vertical average", fontsize=self.label_fontsize)
+            ax6.tick_params(axis="both", labelsize=self.tick_fontsize)
             ax6.grid(True, linestyle="--", alpha=0.35)
             if ax6.lines:
-                ax6.legend(fontsize=10, ncol=1)
+                ax6.legend(fontsize=self.legend_fontsize, ncol=1)
             fig6.tight_layout()
 
             fig6_path = os.path.join(png_dir, f"TKE_Budget_LHS_only_t{time_tag}.png")
@@ -636,17 +641,17 @@ class TKEBudgetAnalyzer:
             print(f"No {column_name} curves available. Skip comparison figure.")
             return
 
-        ax.set_title(title, fontsize=22)
-        ax.set_xlabel(r'$(x_f-x)/H$', fontsize=20)
+        ax.set_title(title, fontsize=self.title_fontsize)
+        ax.set_xlabel(r'$(x_f-x)/H$', fontsize=self.label_fontsize)
         ax.set_xlim(self.x_dime_max, 0.0)
-        # ax.set_ylabel("Vertical average", fontsize=14)
-        ax.tick_params(axis="both", labelsize=18)
+        # ax.set_ylabel("Vertical average", fontsize=self.label_fontsize)
+        ax.tick_params(axis="both", labelsize=self.tick_fontsize)
         ax.grid(True, linestyle="--", alpha=0.35)
-        ax.legend(fontsize=14, ncol=1,loc='upper left')
+        ax.legend(fontsize=self.legend_fontsize, ncol=1,loc='upper left')
         #scilimits=(-2, 3) 表示：数量级小于 10^-2 (即0.01) 或大于 10^3 时触发统一的科学计数法
         ax.ticklabel_format(style='sci', axis='y', scilimits=(-2, 3))
         offset_text = ax.yaxis.get_offset_text()
-        offset_text.set_fontsize(16)
+        offset_text.set_fontsize(self.offset_fontsize)
         fig.tight_layout()
 
         fig_path = os.path.join(self.output_dir, file_name)
@@ -703,10 +708,10 @@ class TKEBudgetAnalyzer:
         cbar.set_label("Ri")
         cbar.set_ticks(np.linspace(0.0, 1.0, 6))
 
-        ax.set_title(f"Ri Cloud Plot after Spanwise Average at {self._time_label(time_v)}", fontsize=14)
-        ax.set_xlabel(r"$(x_f-x)/H$", fontsize=12)
-        ax.set_ylabel("y", fontsize=12)
-        ax.tick_params(axis="both", labelsize=10)
+        ax.set_title(f"Ri Cloud Plot after Spanwise Average at {self._time_label(time_v)}", fontsize=self.title_fontsize)
+        ax.set_xlabel(r"$(x_f-x)/H$", fontsize=self.label_fontsize)
+        ax.set_ylabel("y", fontsize=self.label_fontsize)
+        ax.tick_params(axis="both", labelsize=self.tick_fontsize)
         ax.set_xlim(self.ri_x_dime_max, 0.0)
         ax.set_ylim(float(np.min(y_axis)), float(np.max(y_axis)))
         fig.tight_layout()
@@ -781,13 +786,13 @@ class TKEBudgetAnalyzer:
         ax.plot(compare_df["x_dime"], compare_df["frob_norm_of"], linewidth=self.curve_lw, label="||gradU||_F (OF)")
         ax.plot(compare_df["x_dime"], compare_df["frob_norm_py"], linewidth=self.curve_lw, linestyle="--", label="||gradU||_F (Python)")
         ax.plot(compare_df["x_dime"], np.abs(compare_df["frob_norm_diff"]), linewidth=self.curve_lw, linestyle=":", label="|Delta ||gradU||_F|")
-        ax.set_title(f"gradU Comparison: OF vs Python at {self._time_label(time_v)}", fontsize=16)
-        ax.set_xlabel(r'$(x_f-x)/H$', fontsize=14)
+        ax.set_title(f"gradU Comparison: OF vs Python at {self._time_label(time_v)}", fontsize=self.title_fontsize)
+        ax.set_xlabel(r'$(x_f-x)/H$', fontsize=self.label_fontsize)
         ax.set_xlim(self.x_dime_max, 0.0)
-        ax.set_ylabel("Vertical average", fontsize=14)
-        ax.tick_params(axis="both", labelsize=12)
+        ax.set_ylabel("Vertical average", fontsize=self.label_fontsize)
+        ax.tick_params(axis="both", labelsize=self.tick_fontsize)
         ax.grid(True, linestyle="--", alpha=0.35)
-        ax.legend(fontsize=10, ncol=1)
+        ax.legend(fontsize=self.legend_fontsize, ncol=1)
         fig.tight_layout()
 
         fig_path = os.path.join(png_dir, f"gradU_compare_t{self._time_tag(time_v)}.png")
