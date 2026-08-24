@@ -14,9 +14,11 @@ class TurbidityCurrentAnalyzer:
         self.sol = "/media/amber/PhD_TC/Turbidity_current/Bonnecaze/Middle_particle23/case230327_1"
         # self.output_dir = "/home/amber/postpro/u_vorticity/tc3d_23ofcal"
         # self.sol = "/media/amber/PhD_TC/Turbidity_current/Bonnecaze/FIne_particle9/case090327_11"
+        # self.sol = "/media/amber/PhD_TC/Turbidity_current/Bonnecaze/FIne_particle9/2d/case090604_2test"
+        # self.sol = "/media/amber/PhD_TC/Turbidity_current/Bonnecaze/Middle_particle23/2D/case230604_3test"
         self.times = [15,25,35]
         self.output_root = "/home/amber/postpro/u_vorticity"
-        self.output_prefix = "tc3d_23ofcal"
+        self.output_prefix = "tc3d_23"
         
 
         # 仅读取已经算好的项
@@ -53,28 +55,39 @@ class TurbidityCurrentAnalyzer:
         self.curve_fig_size = (30, 6)
         self.curve_lw = 2.0
         self.alpha_threshold = 1e-5
+        self.alpha_interface = 1e-5  # iso-surface level used for interface sampling
         self.head_x_scale = 0.3
         self.clip_negative_x = True
         self.save_curve_csv = True
-        self.save_curve_png = True
+        self.save_curve_png = False
+        # Keep only the whole curves CSV; skip the per-group (TEND/ADV/...)
+        # split files.  The user wants "整个的 csv".
+        self.save_curve_group_csv = False
         self.curve_groups = {
-            r"TEND": ["ddt1", "ddt2", "ddt3"],
-            r"ADV": ["adv1", "adv2", "adv3", "adv4", "adv5"],
-            r"DIFF": ["diff1", "diff2", "diff3", "diff4", "diff5"],
-            r"DRAG": ["drag1", "drag2", "drag3"],
+            r"TEND": ["ddt1", "ddt2", "ddt3", "ddt_sum"],
+            r"ADV": ["adv1", "adv2", "adv3", "adv4", "adv5", "adv_sum"],
+            r"DIFF": ["diff1", "diff2", "diff3", "diff4", "diff5", "diff_sum"],
+            r"DRAG": ["drag1", "drag2", "drag3", "drag_sum"],
             r"GRAVITY": ["gravity1"],
             r"PRESSURE": ["pressure1"],
             # combined gravity + pressure term (added so curves include the sum)
             r"GRAV+P": ["GP"],
+        }
+        self.curve_sum_groups = {
+            "ddt_sum": ["ddt1", "ddt2", "ddt3"],
+            "adv_sum": ["adv1", "adv2", "adv3", "adv4", "adv5"],
+            "diff_sum": ["diff1", "diff2", "diff3", "diff4", "diff5"],
+            "drag_sum": ["drag1", "drag2", "drag3"],
         }
         self.robust_percentile = (1.0, 99.0)
         self.advection_percentile = (3.0, 92.0)
         self.advection_gamma = 0.45
         self.diffusion_percentile = (5.0, 90.0)
         self.diffusion_gamma = 0.35
-        self.export_paraview = True
+        self.export_paraview = False
         self.rhoa = 3217
         self.rhob = 1000
+        self.time_scale = 1.175
         self.H0 = 0.3
         self.g = 9.81
         self.label_fontsize = 32
@@ -96,18 +109,30 @@ class TurbidityCurrentAnalyzer:
             raise ValueError(f"sort_idx size mismatch: got {sort_idx.size}, expected {n_cells}")
 
         if arr.ndim == 1:
+            # OpenFOAM uniform scalar fields are returned by fluidfoam as one value.
+            if arr.size == 1:
+                arr = np.full(n_cells, float(arr[0]), dtype=arr.dtype)
             if arr.size != n_cells:
                 raise ValueError(f"field size mismatch: got {arr.size}, expected {n_cells}")
             return arr[sort_idx].reshape(nx, ny, nz)
 
         if arr.ndim == 2:
+            # OpenFOAM uniform vector fields are returned by fluidfoam as one vector.
+            if arr.shape == (3, 1):
+                arr = np.repeat(arr, n_cells, axis=1)
+            elif arr.shape == (1, 3):
+                arr = np.repeat(arr.T, n_cells, axis=1)
+
             # fluidfoam vector layout can be (3, n_cells) or (n_cells, 3)
             if arr.shape == (n_cells, 3):
                 arr = arr.T
             if arr.shape == (3, n_cells):
                 return arr[:, sort_idx].reshape(3, nx, ny, nz)
 
-        raise ValueError(f"Unsupported field shape {arr.shape}; expected (n_cells,), (3, n_cells) or (n_cells, 3)")
+        raise ValueError(
+            f"Unsupported field shape {arr.shape}; expected (n_cells,), (1,), "
+            "(3, n_cells), (n_cells, 3), (3, 1) or (1, 3)"
+        )
 
     @staticmethod
     def compute_spanwise_average(field_3d: np.ndarray) -> np.ndarray:
@@ -189,7 +214,7 @@ class TurbidityCurrentAnalyzer:
         if self.head_x_scale == 0.0:
             raise ValueError("head_x_scale must be non-zero")
         x_dime = (x_head - x_seg) / self.head_x_scale
-        mask = (x_dime >= 0.0) & (x_dime <= self.x_lim)
+        mask = x_dime >= 0.0
         return x_seg[mask], x_dime[mask], mask
 
     @staticmethod
@@ -199,14 +224,11 @@ class TurbidityCurrentAnalyzer:
             ax.legend(**kwargs)
     
     @staticmethod
-    def dimensionless_vorticity(q_2d: np.ndarray, rhoa: float, rhob: float, H0: float, g: float) -> np.ndarray:
-        # Convert vorticity to dimensionless form using reference scales.
-        # This assumes q_2d has dimensions of 1/s (vorticity).
+    def dimensionless_vorticity_transport(q_2d: np.ndarray, density_scale: float, time_scale: float) -> np.ndarray:
+        # Vort_* fields include density; divide by density and multiply by T^2.
         if not np.issubdtype(q_2d.dtype, np.floating):
             raise ValueError(f"Expected q_2d to be a floating-point array, got {q_2d.dtype}")
-        gstar = g * (rhoa * 0.01 + rhob * 0.99 - rhob) / (rhoa - rhob)
-        scale = rhob * gstar / H0
-        return q_2d / scale
+        return q_2d / density_scale * time_scale**2
 
     def _locate_head_index(self, alpha_a_2d: np.ndarray) -> Optional[int]:
         """Find last x index where spanwise-averaged alpha_a exceeds threshold at any y.
@@ -260,101 +282,268 @@ class TurbidityCurrentAnalyzer:
 
         for name, field_2d in terms_2d.items():
             field_seg = field_2d[: head_idx + 1, :][mask, :]
-            curves[f"{name}_avg"], curves[f"{name}_height"] = self._vertical_average_to_zerocity_zero(
+            curves[f"{name}_avg"], _ = self._vertical_average_to_zerocity_zero(
                 field_seg,
                 y_axis,
                 ubx_2d[: head_idx + 1, :][mask, :],
             )
-            curves[f"{name}_integral"] = self._vertical_integral(field_seg, y_axis)
 
         return pd.DataFrame(curves)
 
-    def _save_curve_outputs(self, time_v: float, df_curve: pd.DataFrame, curve_dir: str) -> None:
+    def _alpha_threshold_height(self, alpha_2d: np.ndarray, y_coords: np.ndarray, threshold: float) -> np.ndarray:
+        """Interpolated y-height where alpha crosses the threshold for each x.
+
+        The interface is the topmost y where alpha >= threshold (concentration
+        decreases upward); linear interpolation is used between the two
+        bracketing grid points.
+        """
+        heights = np.full(alpha_2d.shape[0], np.nan, dtype=float)
+        for i in range(alpha_2d.shape[0]):
+            profile = alpha_2d[i]
+            valid = np.isfinite(profile) & np.isfinite(y_coords)
+            y_valid = y_coords[valid]
+            alpha_valid = profile[valid]
+
+            above = alpha_valid >= threshold
+            if y_valid.size == 0 or not np.any(above):
+                continue
+
+            top_idx = int(np.where(above)[0].max())
+            if top_idx >= y_valid.size - 1:
+                heights[i] = float(y_valid[top_idx])
+                continue
+
+            a0 = float(alpha_valid[top_idx])
+            a1 = float(alpha_valid[top_idx + 1])
+            y0 = float(y_valid[top_idx])
+            y1 = float(y_valid[top_idx + 1])
+            if abs(a1 - a0) > 1e-20:
+                heights[i] = y0 + (threshold - a0) / (a1 - a0) * (y1 - y0)
+            else:
+                heights[i] = y0
+        return heights
+
+    @staticmethod
+    def _interp_along_y(field_2d: np.ndarray, y_coords: np.ndarray, heights: np.ndarray) -> np.ndarray:
+        """Linearly interpolate a 2D field at a per-column height h(x)."""
+        nx = field_2d.shape[0]
+        out = np.full(nx, np.nan, dtype=float)
+        for i in range(nx):
+            h = heights[i]
+            if not np.isfinite(h):
+                continue
+            profile = field_2d[i]
+            valid = np.isfinite(profile) & np.isfinite(y_coords)
+            if np.count_nonzero(valid) < 2:
+                continue
+            out[i] = float(np.interp(h, y_coords[valid], profile[valid]))
+        return out
+
+    @staticmethod
+    def _alpha_threshold_height_3d(alpha_3d: np.ndarray, y_coords: np.ndarray, threshold: float) -> np.ndarray:
+        """Interpolated interface height h(x, z) for every (x, z) column in 3D.
+
+        Same topmost-crossing logic as _alpha_threshold_height, but applied per
+        (x, z) vertical column before any spanwise averaging.  Shape (nx, nz);
+        NaN where no grid point reaches the threshold.
+        """
+        nx, ny, nz = alpha_3d.shape
+        heights = np.full((nx, nz), np.nan, dtype=float)
+        for ix in range(nx):
+            for iz in range(nz):
+                profile = alpha_3d[ix, :, iz]
+                valid = np.isfinite(profile) & np.isfinite(y_coords)
+                y_valid = y_coords[valid]
+                alpha_valid = profile[valid]
+                above = alpha_valid >= threshold
+                if y_valid.size == 0 or not np.any(above):
+                    continue
+                top_idx = int(np.where(above)[0].max())
+                if top_idx >= y_valid.size - 1:
+                    heights[ix, iz] = float(y_valid[top_idx])
+                    continue
+                a0 = float(alpha_valid[top_idx])
+                a1 = float(alpha_valid[top_idx + 1])
+                y0 = float(y_valid[top_idx])
+                y1 = float(y_valid[top_idx + 1])
+                if abs(a1 - a0) > 1e-20:
+                    heights[ix, iz] = y0 + (threshold - a0) / (a1 - a0) * (y1 - y0)
+                else:
+                    heights[ix, iz] = y0
+        return heights
+
+    @staticmethod
+    def _interp_along_y_3d(field_3d: np.ndarray, y_coords: np.ndarray, heights: np.ndarray) -> np.ndarray:
+        """Interpolate a 3D field at a per-(x, z) interface height h(x, z)."""
+        nx, ny, nz = field_3d.shape
+        out = np.full((nx, nz), np.nan, dtype=float)
+        for ix in range(nx):
+            for iz in range(nz):
+                h = heights[ix, iz]
+                if not np.isfinite(h):
+                    continue
+                profile = field_3d[ix, :, iz]
+                valid = np.isfinite(profile) & np.isfinite(y_coords)
+                if np.count_nonzero(valid) < 2:
+                    continue
+                out[ix, iz] = float(np.interp(h, y_coords[valid], profile[valid]))
+        return out
+
+    @staticmethod
+    def _spanwise_nanmean(arr: np.ndarray) -> np.ndarray:
+        """Mean along the last (z) axis ignoring NaN; NaN for all-NaN rows.
+
+        Like np.nanmean(axis=-1) but without the 'Mean of empty slice'
+        RuntimeWarning when a whole x-row has no interface (NaN everywhere).
+        """
+        mask = np.isfinite(arr)
+        counts = mask.sum(axis=-1)
+        sums = np.where(mask, arr, 0.0).sum(axis=-1)
+        out = np.full_like(arr[..., 0], np.nan, dtype=float)
+        nz = counts > 0
+        out[nz] = sums[nz] / counts[nz]
+        return out
+
+    def _build_interface_dataframe(
+        self,
+        x_2d: np.ndarray,
+        y_2d: np.ndarray,
+        terms_2d: Dict[str, np.ndarray],
+        alpha_2d: np.ndarray,
+        head_idx: int,
+        head_x: float,
+    ) -> pd.DataFrame:
+        """Sample every term at the alpha = alpha_interface iso-surface.
+
+        After spanwise averaging, the iso-surface becomes the contour line
+        h(x) where alpha_2d(x, h(x)) = alpha_interface.  Each (spanwise
+        averaged) term is linearly interpolated at (x, h(x)) to produce a 1D
+        curve of interface values vs x_dime.
+        """
+        x_axis = x_2d[:, 0]
+        y_axis = y_2d[0, :]
+
+        x_seg = x_axis[: head_idx + 1]
+        x_seg, x_dime, mask = self._trim_x_dime(x_seg, head_x)
+
+        alpha_seg = alpha_2d[: head_idx + 1, :][mask, :]
+        heights = self._alpha_threshold_height(alpha_seg, y_axis, self.alpha_interface)
+
+        curves = {
+            "x": x_seg,
+            "x_dime": x_dime,
+            "h_iface": heights,
+            "h_iface_H0": heights / self.H0,
+        }
+
+        for name, field_2d in terms_2d.items():
+            field_seg = field_2d[: head_idx + 1, :][mask, :]
+            curves[f"{name}_iface"] = self._interp_along_y(field_seg, y_axis, heights)
+
+        return pd.DataFrame(curves)
+
+    def _build_interface_dataframe_compare(
+        self,
+        x_2d: np.ndarray,
+        y_2d: np.ndarray,
+        terms_2d: Dict[str, np.ndarray],
+        terms_3d: Dict[str, np.ndarray],
+        alpha_2d: np.ndarray,
+        h_B: np.ndarray,
+        head_idx: int,
+        head_x: float,
+    ) -> pd.DataFrame:
+        """Interface values by two orderings, side by side for comparison.
+
+        A) spanwise-average first, then find the alpha = alpha_interface
+           contour h(x) and interpolate the averaged terms at (x, h(x)).
+        B) find the iso-surface first in 3D: per (x, z) column get h(x, z),
+           sample each term on it, then spanwise-average the interface values
+           (h_B and the per-term 1D curves in terms_3d are already reduced).
+
+        terms_3d carries the method-B 1D curves for every term (base terms
+        sampled on the 3D interface, plus derived sums); NaN where missing.
+        """
+        x_axis = x_2d[:, 0]
+        y_axis = y_2d[0, :]
+
+        x_seg = x_axis[: head_idx + 1]
+        x_seg, x_dime, mask = self._trim_x_dime(x_seg, head_x)
+
+        # Method A: interface of the spanwise-averaged field
+        alpha_seg_A = alpha_2d[: head_idx + 1, :][mask, :]
+        h_A = self._alpha_threshold_height(alpha_seg_A, y_axis, self.alpha_interface)
+
+        curves = {
+            "x": x_seg,
+            "x_dime": x_dime,
+            "h_iface_A": h_A,
+            "h_iface_A_H0": h_A / self.H0,
+            "h_iface_B": h_B,
+            "h_iface_B_H0": h_B / self.H0,
+        }
+
+        for name, field_2d in terms_2d.items():
+            field_seg = field_2d[: head_idx + 1, :][mask, :]
+            curves[f"{name}_A"] = self._interp_along_y(field_seg, y_axis, h_A)
+            b_val = terms_3d.get(name)
+            curves[f"{name}_B"] = b_val if b_val is not None else np.full(x_seg.size, np.nan)
+
+        return pd.DataFrame(curves)
+
+    def _save_interface_compare_outputs(self, time_v: float, df_iface: pd.DataFrame, output_dir: str) -> None:
+        if df_iface is None or df_iface.empty:
+            return
+
+        time_dir = self._time_to_dir_name(time_v)
+        time_dim = float(time_v) * 0.85
+        os.makedirs(output_dir, exist_ok=True)
+
+        df_out = df_iface.copy()
+        df_out.insert(0, "time", float(time_v))
+        df_out.insert(1, "time_dim", time_dim)
+
+        csv_path = os.path.join(output_dir, f"vorticity_interface_{self.alpha_interface}_compare_t{time_dir}.csv")
+        df_out.to_csv(csv_path, index=False)
+        print(f"  saved: {csv_path}")
+
+    def _save_curve_outputs(self, time_v: float, df_curve: pd.DataFrame, output_dir: str) -> None:
         if not self.save_curve_csv and not self.save_curve_png:
             return
 
         time_dir = self._time_to_dir_name(time_v)
         # time_v is numeric; compute nondimensional time from numeric value
         time_dim = float(time_v) * 0.85
-        os.makedirs(curve_dir, exist_ok=True)
+        os.makedirs(output_dir, exist_ok=True)
+
+        df_curve = df_curve.copy()
+        df_curve.insert(0, "time", float(time_v))
+        df_curve.insert(1, "time_dim", time_dim)
 
         if self.save_curve_csv:
-            csv_path = os.path.join(curve_dir, f"vorticity_curves_t{time_dir}.csv")
+            csv_path = os.path.join(output_dir, f"vorticity_curves_t{time_dir}.csv")
             df_curve.to_csv(csv_path, index=False)
             print(f"  saved: {csv_path}")
 
-        plot_mask = (df_curve["x_dime"].to_numpy(dtype=float) >= 0.0) & (
-            df_curve["x_dime"].to_numpy(dtype=float) <= self.x_lim
-        )
+        plot_mask = df_curve["x_dime"].to_numpy(dtype=float) >= 0.0
         df_plot = df_curve.loc[plot_mask].copy()
 
-        for group_name, short_names in self.curve_groups.items():
-            group_cols = ["x", "x_dime"]
-            for short_name in short_names:
-                for suffix in ("_avg", "_integral", "_height"):
-                    col_name = f"{short_name}{suffix}"
+        if self.save_curve_group_csv:
+            for group_name, short_names in self.curve_groups.items():
+                group_cols = ["time", "time_dim", "x", "x_dime"]
+                for short_name in short_names:
+                    col_name = f"{short_name}_avg"
                     if col_name in df_plot.columns:
                         group_cols.append(col_name)
 
-            if len(group_cols) == 2:
-                continue
-
-            group_df = df_plot[group_cols].copy()
-            if self.save_curve_csv:
-                group_csv = os.path.join(curve_dir, f"vorticity_curves_{group_name}_t{time_dir}.csv")
-                group_df.to_csv(group_csv, index=False)
-                print(f"  saved: {group_csv}")
-
-            if not self.save_curve_png:
-                continue
-
-            for suffix, title_part, ylabel, file_tag in (
-                ("_avg", "Vertical Average", "Average", "avg"),
-                ("_integral", "Vertical Integral", "Integral", "int"),
-                ("_height", "Selection Height", "Height (m)", "height"),
-            ):
-                cols = [f"{short_name}{suffix}" for short_name in short_names if f"{short_name}{suffix}" in df_plot.columns]
-                if not cols:
+                if len(group_cols) == 4:
                     continue
 
-                fig, ax = plt.subplots(figsize=self.curve_fig_size)
-                for col in cols:
-                    short_name = col[: -len(suffix)] if suffix else col
-                    # Prefer using the group name (e.g. TEND, ADV) as the legend label
-                    group_label = None
-                    for gname, shorts in self.curve_groups.items():
-                        if short_name in shorts:
-                            group_label = gname
-                            break
-
-                    if suffix == "_avg":
-                        base = group_label if group_label is not None else short_name
-                        label = rf"$\langle {short_name} \rangle_d$"
-                    elif suffix == "_integral":
-                        base = group_label if group_label is not None else short_name
-                        label = rf"${short_name}_{{int}}$"
-                    else:
-                        label = group_label if group_label is not None else col
-
-                    ax.plot(df_plot["x_dime"], df_plot[col], linewidth=self.curve_lw, label=label)
-
-                ax.set_title(rf"{group_name}  at $t$={time_dim:.2f}", fontsize=self.title_fontsize)
-                ax.set_xlabel(rf"$(x_f-x)/H_0$", fontsize=self.label_fontsize)
-                ax.set_xlim(self.x_lim, 0.0)
-                # ax.set_ylabel(ylabel, fontsize=self.label_fontsize)
-                ax.tick_params(axis="both", labelsize=self.tick_fontsize)
-                ax.grid(True, linestyle="--", alpha=0.35)
-                if suffix != "_height":
-                    ax.ticklabel_format(style='sci', axis='y', scilimits=(-1, 3))
-                    offset_text = ax.yaxis.get_offset_text()
-                    offset_text.set_fontsize(self.offset_fontsize)
-                self._legend_if_any(ax, fontsize=self.legend_fontsize, ncol=3, loc="upper left")
-                fig.tight_layout()
-
-                out_path = os.path.join(curve_dir, f"vorticity_curves_{group_name}_{file_tag}_t{time_dir}.png")
-                fig.savefig(out_path, bbox_inches="tight", dpi=300)
-                plt.close(fig)
-                print(f"  saved: {out_path}")
+                group_df = df_plot[group_cols].copy()
+                if self.save_curve_csv:
+                    group_csv = os.path.join(output_dir, f"vorticity_curves_{group_name}_t{time_dir}.csv")
+                    group_df.to_csv(group_csv, index=False)
+                    print(f"  saved: {group_csv}")
 
     def _read_vector_3d(self, time_dir: str, field_name: str, sort_idx: np.ndarray, nx: int, ny: int, nz: int) -> np.ndarray:
         vector_flat = fluidfoam.readvector(self.sol, time_dir, field_name)
@@ -455,14 +644,11 @@ class TurbidityCurrentAnalyzer:
 
     def process_time_step(self, time_v: float, sort_idx: np.ndarray, nx: int, ny: int, nz: int, x_2d: np.ndarray, y_2d: np.ndarray) -> None:
         time_dir = self._time_to_dir_name(time_v)
-        output_dir = os.path.join(self.output_root, f"{self.output_prefix}{time_dir}")
+        output_dir = os.path.join(self.output_root, self.output_prefix)
         paraview_dir = os.path.join(output_dir, f"paraview{time_dir}")
-        curve_dir = os.path.join(output_dir, f"curve_t{time_dir}")
         os.makedirs(output_dir, exist_ok=True)
         if self.export_paraview:
             os.makedirs(paraview_dir, exist_ok=True)
-        
-        os.makedirs(curve_dir, exist_ok=True)
 
         print(f"Processing t={time_dir}...")
 
@@ -483,23 +669,37 @@ class TurbidityCurrentAnalyzer:
         pressure1_2d = None
         curve_terms_2d: Dict[str, np.ndarray] = {}
 
+        # Method B (interface-first): interface height h(x, z) per (x, z) column
+        # in the 3D alpha field, before any spanwise averaging.
+        y_axis = y_2d[0, :]
+        x_seg0 = x_2d[:, 0][: head_idx + 1]
+        _, _, mask0 = self._trim_x_dime(x_seg0, head_x)
+        alpha_seg_3d = alpha_a_3d[: head_idx + 1, :, :][mask0, :, :]
+        h_xz = self._alpha_threshold_height_3d(alpha_seg_3d, y_axis, self.alpha_interface)
+        h_B = self._spanwise_nanmean(h_xz)  # spanwise-averaged interface height
+        interface_3d_terms: Dict[str, np.ndarray] = {}
+
         for short_name, of_field_name in self.vort_fields.items():
             q_vec_3d = self._read_vector_3d(time_dir, of_field_name, sort_idx, nx, ny, nz)
             q_vec_2d = self.compute_spanwise_average(q_vec_3d)
             q_2d = self.vector_to_z_component_2d(q_vec_2d)
-            
+            q_2d = self.dimensionless_vorticity_transport(q_2d, self.rhob, self.time_scale)
+
+            # Method B: sample the z-component 3D field on the per-(x, z)
+            # iso-surface, then spanwise-average those interface values.
+            q_z_3d = self.dimensionless_vorticity_transport(q_vec_3d[2], self.rhob, self.time_scale)
+            q_seg_3d = q_z_3d[: head_idx + 1, :, :][mask0, :, :]
+            val_xz = self._interp_along_y_3d(q_seg_3d, y_axis, h_xz)
+            interface_3d_terms[short_name] = self._spanwise_nanmean(val_xz)
+
             if short_name == "gravity1":
                 gravity1_2d = q_2d
-                
+
             elif short_name == "pressure1":
                 pressure1_2d = q_2d
-                
+
             curve_terms_2d[short_name] = q_2d
 
-
-
-            png_name = f"{short_name}_spanwise_t{time_dir}.png"
-            out_path = os.path.join(output_dir, png_name)
 
 
             if self.export_paraview:
@@ -526,8 +726,6 @@ class TurbidityCurrentAnalyzer:
                     out_path=os.path.join(paraview_dir, f"alpha_a_spanwise_t{time_dir}.vtk"),
                 )
 
-            print(f"  saved: {out_path}")
-
         if self.export_paraview and gravity1_2d is not None and pressure1_2d is not None:
             gp_sum_2d = gravity1_2d + pressure1_2d
             
@@ -551,10 +749,34 @@ class TurbidityCurrentAnalyzer:
         curve_terms_for_output = dict(curve_terms_2d)
         if gravity1_2d is not None and pressure1_2d is not None:
             curve_terms_for_output["GP"] = gravity1_2d + pressure1_2d
+        for sum_name, term_names in self.curve_sum_groups.items():
+            if all(term_name in curve_terms_for_output for term_name in term_names):
+                curve_terms_for_output[sum_name] = sum(curve_terms_for_output[term_name] for term_name in term_names)
+
+        # Derived sums for method B (spanwise mean is linear, so the interface
+        # value of a sum equals the sum of the interface values).
+        for sum_name, term_names in self.curve_sum_groups.items():
+            if all(term_name in interface_3d_terms for term_name in term_names):
+                interface_3d_terms[sum_name] = sum(interface_3d_terms[term_name] for term_name in term_names)
+        if "gravity1" in interface_3d_terms and "pressure1" in interface_3d_terms:
+            interface_3d_terms["GP"] = interface_3d_terms["gravity1"] + interface_3d_terms["pressure1"]
 
         if curve_terms_for_output:
             df_curve = self._build_curve_dataframe(x_2d, y_2d, curve_terms_for_output, ubx_2d, head_idx, head_x)
-            self._save_curve_outputs(time_v, df_curve, curve_dir)
+            self._save_curve_outputs(time_v, df_curve, output_dir)
+
+            # Interface values by both orderings; one CSV per time step.
+            df_iface = self._build_interface_dataframe_compare(
+                x_2d,
+                y_2d,
+                curve_terms_for_output,
+                interface_3d_terms,
+                alpha_a_2d,
+                h_B,
+                head_idx,
+                head_x,
+            )
+            self._save_interface_compare_outputs(time_v, df_iface, output_dir)
 
     def run_analysis(self):
         os.makedirs(self.output_root, exist_ok=True)

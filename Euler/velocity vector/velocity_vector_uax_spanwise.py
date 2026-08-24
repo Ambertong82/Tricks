@@ -5,6 +5,7 @@ from typing import Dict, Optional
 import fluidfoam
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.lines import Line2D
 from scipy.ndimage import gaussian_filter
 
 # Use Times New Roman for all plot text
@@ -34,10 +35,10 @@ class TimeStepVelocity3D:
 class VelocityVectorUaxAnalyzer:
     def __init__(self):
         # OpenFOAM case directory and output directory.
-        self.sol = "/media/amber/PhD_TC/Turbidity_current/Bonnecaze/FIne_particle9/case090704_2"
-        # self.sol = "/media/amber/PhD_TC/Turbidity_current/Bonnecaze/Middle_particle23/case230704_2"
+        self.sol = "/media/amber/PhD_TC/Turbidity_current/Bonnecaze/FIne_particle9/2d/case090604_2"
+        # self.sol = "/media/amber/PhD_TC/Turbidity_current/Bonnecaze/Middle_particle23/2D/case230604_2"
         # self.output_dir = "/home/amber/postpro/velocity_vector/tc3d_d09_0327_12"
-        self.output_dir = "/home/amber/postpro/velocity_vector/tc3d_d09_0704_2"
+        self.output_dir = "/home/amber/postpro/velocity_vector/tc2d_d09_0604_2"
         self.times = [ 2,5,7,12,15,20,25,35]
 
         # alpha.a threshold for current head detection.
@@ -65,6 +66,12 @@ class VelocityVectorUaxAnalyzer:
         self.arrow_scale = 0.85  # Overall scaling for arrowhead size
         self.alpha_contour_color = "0.25"
         self.alpha_contour_linewidth = 1.1
+        # Extra particle-concentration iso-lines on the Q figure (in addition
+        # to alpha_threshold). Colors are visible on the gray_r background and
+        # distinct from the magenta Q* = 1 line.
+        self.alpha_iso_levels = [1e-4, 1e-3]
+        self.alpha_iso_colors = ["#0072B2", "#009E73"]  # blue, green
+        self.legend_fontsize = 24
         self.q_contour_levels = [1.0]
         self.q_contour_linewidth = 1.0
         self.q_smooth_sigma = 1.0
@@ -423,7 +430,19 @@ class VelocityVectorUaxAnalyzer:
             linestyles="--",
             linewidths=self.alpha_contour_linewidth,
         )
+        # Additional particle-concentration iso-lines (10^-4, 10^-3).
+        for level, color in zip(self.alpha_iso_levels, self.alpha_iso_colors):
+            ax_q.contour(
+                xx,
+                yy,
+                alpha_plot,
+                levels=[float(level)],
+                colors=color,
+                linestyles="--",
+                linewidths=self.alpha_contour_linewidth,
+            )
         q_valid = q_contour_field[np.isfinite(q_contour_field)]
+        q_levels = []
         if q_valid.size > 0:
             q_min = float(np.nanmin(q_valid))
             q_max = float(np.nanmax(q_valid))
@@ -441,6 +460,30 @@ class VelocityVectorUaxAnalyzer:
                 linewidths=self.q_contour_linewidth,
                 linestyles='-',
             )
+        # Legend for the alpha iso-lines and the Q contour.
+        # legend_handles = [
+        #     Line2D([0], [0], color=self.alpha_contour_color, linestyle="--",
+        #            linewidth=self.alpha_contour_linewidth, label=r"$\alpha_a=10^{-5}$"),
+        # ]
+        # for level, color in zip(self.alpha_iso_levels, self.alpha_iso_colors):
+        #     legend_handles.append(
+        #         Line2D([0], [0], color=color, linestyle="-",
+        #                linewidth=self.alpha_contour_linewidth,
+        #                label=rf"$\alpha_a=10^{{{int(round(np.log10(float(level))))}}}$")
+        #     )
+        if q_levels:
+            if q_levels == [1.0]:
+                q_label = r"$Q^*=1$"
+            elif len(q_levels) == 1:
+                q_label = rf"$Q^*={q_levels[0]:g}$"
+            else:
+                q_label = r"$Q^*$"
+            # legend_handles.append(
+            #     Line2D([0], [0], color=self.q_contour_color, linestyle="-",
+            #            linewidth=self.q_contour_linewidth, label=q_label)
+            # )
+        # ax_q.legend(handles=legend_handles, loc="upper left", fontsize=self.legend_fontsize,
+        #             frameon=True, framealpha=0.9, edgecolor="0.5")
         ax_q.set_xlabel(r"$(x_{\mathrm{front}}-x)/H_0$", fontsize=self.label_fontsize)
         ax_q.set_yticks([0.0, 0.5, 1.0])
         ax_q.set_ylabel(r"$z*$", fontsize=self.label_fontsize, rotation=0, labelpad=20)

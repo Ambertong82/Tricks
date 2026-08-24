@@ -44,16 +44,16 @@ class TimeStepTerms3D:
 class TKEBudgetAnalyzer:
     def __init__(self):
         # OpenFOAM case directory and output directory for generated CSV/figures.
-        # self.sol = "/media/amber/PhD_TC/Turbidity_current/Bonnecaze/FIne_particle9/case090428_1"
+        # self.sol = "/media/amber/PhD_TC/Turbidity_current/Bonnecaze/FIne_particle9/case090327_12"
         # self.sol = "/media/amber/PhD_TC/Turbidity_current/Bonnecaze/Middle_particle23/case230428_4test"
-        # self.sol = "/media/amber/PhD_TC/Turbidity_current/Bonnecaze/FIne_particle9/2d/case090604_2"
+        self.sol = "/media/amber/PhD_TC/Turbidity_current/Bonnecaze/FIne_particle9/2d/case090604_2"
         # self.output_dir = "/home/amber/postpro/TKE_budget/tc3d_d09_0604_2"
         # self.sol = "/media/amber/PhD_TC/Turbidity_current/Bonnecaze/Middle_particle23/case230428_4"
         # self.output_dir = "/home/amber/postpro/TKE_budget/tc3d_d23_0428_41e3"
-        self.sol = "/media/amber/PhD_TC/Turbidity_current/Bonnecaze/Middle_particle23/2D/case230604_2"
-        self.output_dir = "/home/amber/postpro/TKE_budget/tc3d_d23_0604_2"
+        # self.sol = "/media/amber/PhD_TC/Turbidity_current/Bonnecaze/Middle_particle23/2D/case230604_2"
+        self.output_dir = "/home/amber/postpro/TKE_budget/tc3d_d09_0604_2"
         # Physical times to be processed.
-        self.times = [5,12,25]
+        self.times = [5,12,20,35]
 
         # Threshold to detect current head position from alpha.a.
         self.alpha_threshold = 1e-3
@@ -552,7 +552,10 @@ class TKEBudgetAnalyzer:
                 
         # 2. TKE 项无量纲化 (TKE_avg 属于速度平方项, 除以 U^2; 积分项需额外除以 H)
         if "TKE_avg" in df_out.columns:
-            df_out["TKE_avg"] = df_out["TKE_avg"].to_numpy(dtype=float) / (self.U**2)
+            df_out["TKE_avg"] = np.maximum(
+                df_out["TKE_avg"].to_numpy(dtype=float) / (self.U**2),
+                1e-15,
+            )
         if "TKE_integral" in df_out.columns:
             df_out["TKE_integral"] = df_out["TKE_integral"].to_numpy(dtype=float) / (self.U**2 * self.H)
             
