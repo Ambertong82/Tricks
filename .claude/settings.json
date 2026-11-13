@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -c ' *)",
+      "Bash(python -c ' *)",
+      "Read(//tmp/**)",
+      "Bash(ls /home/amber/postpro/Scour/vanTC/shields/alpha_band_shear_shields3111/ 2>&1 | head)",
+      "Read(//home/amber/postpro/Scour/vanTC/shields/alpha_band_shear_shields3111/**)",
+      "Bash(ls /media/amber/Elements/Scour/vanTC/equalibrium/case1031_7/ 2>/dev/null | head -30; echo \"---- fields in latest time ----\"; ls /media/amber/Elements/Scour/vanTC/equalibrium/case1031_7/ | sort -g | tail -3)",
+      "Read(//media/amber/Elements/Scour/vanTC/equalibrium/case1031_7/**)",
+      "Read(//home/amber/postpro/Scour/vanTC/shields/alpha_band_shear_shields316/**)"
+    ]
+  }
+}

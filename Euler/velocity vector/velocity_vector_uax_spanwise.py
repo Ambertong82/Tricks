@@ -6,7 +6,7 @@ import fluidfoam
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.lines import Line2D
-from scipy.ndimage import gaussian_filter
+from scipy.ndimage import gaussian_filter, label
 
 # Use Times New Roman for all plot text
 plt.rcParams['font.family'] = 'serif'
@@ -30,16 +30,19 @@ class TimeStepVelocity3D:
     ux: np.ndarray
     uy: np.ndarray
     q: np.ndarray
+    omega_z: np.ndarray
 
 
 class VelocityVectorUaxAnalyzer:
     def __init__(self):
         # OpenFOAM case directory and output directory.
-        self.sol = "/media/amber/PhD_TC/Turbidity_current/Bonnecaze/FIne_particle9/2d/case090604_2"
-        # self.sol = "/media/amber/PhD_TC/Turbidity_current/Bonnecaze/Middle_particle23/2D/case230604_2"
-        # self.output_dir = "/home/amber/postpro/velocity_vector/tc3d_d09_0327_12"
-        self.output_dir = "/home/amber/postpro/velocity_vector/tc2d_d09_0604_2"
-        self.times = [ 2,5,7,12,15,20,25,35]
+        # self.sol = "/media/amber/PhD_TC/Turbidity_current/Bonnecaze/FIne_particle9/case090327_12"
+        # self.sol = "/media/amber/PhD_TC/Turbidity_current/Bonnecaze/Middle_particle23/case230428_4"
+        self.sol = "/media/amber/PhD_TC/Turbidity_current/Bonnecaze/Middle_particle23/2D/case230604_2"
+        # self.output_dir = "/home/amber/postpro/velocity_vector/tc3d_d09_0327_12_q2"
+        self.output_dir = "/home/amber/postpro/velocity_vector/tc3d_d23_0604_2_q2"
+        # self.output_dir = "/home/amber/postpro/velocity_vector/tc2d_d09_0604_2"
+        self.times = [ 12,15,20,25,35]
 
         # alpha.a threshold for current head detection.
         self.alpha_threshold = 1e-5
@@ -72,7 +75,7 @@ class VelocityVectorUaxAnalyzer:
         self.alpha_iso_levels = [1e-4, 1e-3]
         self.alpha_iso_colors = ["#0072B2", "#009E73"]  # blue, green
         self.legend_fontsize = 24
-        self.q_contour_levels = [1.0]
+        self.q_contour_levels = [5]
         self.q_contour_linewidth = 1.0
         self.q_smooth_sigma = 1.0
         self.q_contour_color = "#FF00FF"
@@ -146,6 +149,28 @@ class VelocityVectorUaxAnalyzer:
         rot_sq = 2.0 * (w_xy**2 + w_xz**2 + w_yz**2)
         return 0.5 * (rot_sq - strain_sq)
 
+    @staticmethod
+    def _compute_vorticity_z_3d(grad_u: np.ndarray) -> np.ndarray:
+        """Return the z component of vorticity, omega_z = dUy/dx - dUx/dy."""
+        if grad_u.shape[0] != 9:
+            raise ValueError(f"Expected grad_u with 9 tensor components, got {grad_u.shape[0]}")
+        gxx, gxy, _gxz, gyx, _gyy, _gyz, _gzx, _gzy, _gzz = grad_u
+        return gyx - gxy
+
+    @staticmethod
+    def _integrate_circulation(
+        x_axis: np.ndarray,
+        y_axis: np.ndarray,
+        omega_z: np.ndarray,
+        alpha: np.ndarray,
+        alpha_threshold: float,
+    ) -> float:
+        """Integrate omega dot e_z over the alpha-defined x-y current section."""
+        mask = (alpha > alpha_threshold) & np.isfinite(omega_z)
+        integrand = np.where(mask, omega_z, 0.0)
+        # Integrating the masked field as zero avoids NaNs at the interface.
+        return float(np.trapz(np.trapz(integrand, y_axis, axis=1), x_axis))
+
     def _locate_head_index(self, alpha_a_2d: np.ndarray) -> Optional[int]:
         mask_x = np.any(alpha_a_2d > self.alpha_threshold, axis=1)
         valid_x = np.where(mask_x)[0]
@@ -181,6 +206,7 @@ class VelocityVectorUaxAnalyzer:
             grad_raw = fluidfoam.readtensor(self.sol, time_dir, f"grad({self.velocity_field})")
             grad_3d = self._reshape_sorted(grad_raw, sort_idx, nx, ny, nz)
             q_3d = self._compute_q_criterion_3d(grad_3d)
+            omega_z = self._compute_vorticity_z_3d(grad_3d)
         except Exception as exc:
             print(f"Read failed for grad({self.velocity_field}) at t={time_v}: {exc}")
             return None
@@ -194,6 +220,7 @@ class VelocityVectorUaxAnalyzer:
             ux=ux,
             uy=uy,
             q=q_3d,
+            omega_z=omega_z,
         )
 
     @staticmethod
@@ -258,6 +285,7 @@ class VelocityVectorUaxAnalyzer:
         uy_2d: np.ndarray,
         alpha_2d: np.ndarray,
         q_2d: np.ndarray,
+        omega_z_2d: np.ndarray,
         head_idx: int,
         head_x: float,
     ) -> None:
@@ -275,6 +303,7 @@ class VelocityVectorUaxAnalyzer:
         uay_seg = uy_2d[: head_idx + 1, :]
         a_seg = np.maximum(alpha_2d[: head_idx + 1, :], 0.0)
         q_seg = q_2d[: head_idx + 1, :]
+        omega_z_seg = omega_z_2d[: head_idx + 1, :]
 
         x_order = np.argsort(x_dime)
         x_plot = x_dime[x_order]
@@ -282,6 +311,7 @@ class VelocityVectorUaxAnalyzer:
         uay_plot = uay_seg[x_order, :]
         a_plot = a_seg[x_order, :]
         q_plot = q_seg[x_order, :]
+        omega_z_plot = omega_z_seg[x_order, :]
 
         if x_plot.size < 2 or np.any(np.diff(x_plot) <= 0):
             print(f"Non-monotonic x grid at t={time_v}. Skip vector output.")
@@ -294,7 +324,8 @@ class VelocityVectorUaxAnalyzer:
         x_plot, y_vals, interp = self._interp_to_uniform_grid(
             x_plot,
             y_vals,
-            {"u": uax_plot, "v": uay_plot, "alpha": a_plot, "q": q_plot},
+            {"u": uax_plot, "v": uay_plot, "alpha": a_plot, "q": q_plot,
+             "omega_z": omega_z_plot},
             self.interp_nx,
             self.interp_ny,
         )
@@ -302,6 +333,7 @@ class VelocityVectorUaxAnalyzer:
         uay_plot = interp["v"]
         a_plot = interp["alpha"]
         q_plot = interp["q"]
+        omega_z_plot = interp["omega_z"]
 
         xx, yy = np.meshgrid(x_plot, y_vals, indexing="ij")
         valid = a_plot[np.isfinite(a_plot)]
@@ -370,6 +402,80 @@ class VelocityVectorUaxAnalyzer:
         mask_alpha = alpha_plot > self.alpha_threshold
         q_contour_field = self._smooth_masked_field(q_nd_full, mask_alpha)
 
+        # Identify connected Q-vortex regions and integrate signed omega_z
+        # over each region. Q levels are dimensionless (Q*).
+        q_level = float(self.q_contour_levels[0]) if self.q_contour_levels else 0.0
+        vortex_mask = mask_alpha & np.isfinite(q_contour_field) & (q_contour_field >= q_level)
+        component_ids, component_count = label(vortex_mask, structure=np.ones((3, 3), dtype=int))
+        x_phys = head_x - x_plot * self.H
+        y_phys = y_vals * self.H
+        if x_phys[0] > x_phys[-1]:
+            x_phys = x_phys[::-1]
+            omega_for_int = omega_z_plot[::-1, :]
+            component_for_int = component_ids[::-1, :]
+        else:
+            omega_for_int = omega_z_plot
+            component_for_int = component_ids
+        circulation_rows = []
+        for component_id in range(1, component_count + 1):
+            region = component_for_int == component_id
+            integrand = np.where(region & np.isfinite(omega_for_int), omega_for_int, 0.0)
+            gamma = float(np.trapz(np.trapz(integrand, y_phys, axis=1), x_phys))
+            area = float(np.trapz(np.trapz(region.astype(float), y_phys, axis=1), x_phys))
+            q_region = q_contour_field[component_ids == component_id]
+            circulation_rows.append((component_id, area, gamma, float(np.nanmax(q_region))))
+        circulation_file = os.path.join(out_dir, f"q_vortex_circulation_t{time_v:.2f}.csv")
+        with open(circulation_file, "w", encoding="utf-8") as stream:
+            stream.write("component,area_m2,gamma_m2_per_s,qstar_max\n")
+            for row in circulation_rows:
+                stream.write(f"{row[0]},{row[1]:.12e},{row[2]:.12e},{row[3]:.12e}\n")
+        print(f"Identified {component_count} Q regions; saved {circulation_file}")
+
+        # Signed spanwise-vorticity field for the same x-y section.
+        omega_valid = omega_z_plot[np.isfinite(omega_z_plot)]
+        if omega_valid.size:
+            omega_limit = float(np.nanpercentile(np.abs(omega_valid), 99.0))
+            omega_limit = max(omega_limit, 1e-12)
+            fig_omega, ax_omega = plt.subplots(figsize=self.fig_size)
+            fig_omega.subplots_adjust(left=0.08, right=0.985, bottom=0.20, top=0.80)
+            omega_levels = np.linspace(-omega_limit, omega_limit, 121)
+            omega_plot = np.clip(omega_z_plot, -omega_limit, omega_limit)
+            omega_mesh = ax_omega.contourf(
+                xx, yy, omega_plot, levels=omega_levels, cmap="RdBu_r", extend="both"
+            )
+            ax_omega.contour(
+                xx, yy, alpha_plot, levels=[self.alpha_threshold],
+                colors="0.25", linestyles="--", linewidths=self.alpha_contour_linewidth,
+            )
+            q_overlay_valid = q_contour_field[np.isfinite(q_contour_field)]
+            q_overlay_levels = []
+            if q_overlay_valid.size:
+                q_overlay_min = float(np.nanmin(q_overlay_valid))
+                q_overlay_max = float(np.nanmax(q_overlay_valid))
+                q_overlay_levels = [
+                    float(level) for level in self.q_contour_levels
+                    if q_overlay_min <= float(level) <= q_overlay_max
+                ]
+            if q_overlay_levels:
+                ax_omega.contour(
+                    xx, yy, q_contour_field, levels=q_overlay_levels,
+                    colors=self.q_contour_color, linestyles="-",
+                    linewidths=self.q_contour_linewidth,
+                )
+            cbar_omega = fig_omega.colorbar(omega_mesh, ax=ax_omega, pad=0.01)
+            cbar_omega.set_label(r"$\omega_z$ [s$^{-1}$]", fontsize=self.cbar_labelsize)
+            cbar_omega.ax.tick_params(labelsize=self.cbar_ticksize)
+            ax_omega.set_xlabel(r"$(x_{\mathrm{front}}-x)/H_0$", fontsize=self.label_fontsize)
+            ax_omega.set_ylabel(r"$y/H_0$", fontsize=self.label_fontsize, rotation=0, labelpad=20)
+            ax_omega.set_yticks([0.0, 0.5, 1.0])
+            ax_omega.set_xlim(float(np.max(x_plot)), 0.0)
+            ax_omega.set_ylim(0.0, 1.0)
+            ax_omega.tick_params(axis="both", labelsize=self.tick_fontsize, width=0.8, length=3.5)
+            out_omega_png = os.path.join(out_dir, f"vorticity_z_spanwise_t{time_v:.2f}.png")
+            fig_omega.savefig(out_omega_png, dpi=300, bbox_inches="tight", pad_inches=0.05)
+            plt.close(fig_omega)
+            print(f"Saved Vorticity Figure: {out_omega_png}")
+
         q = ax_vec.quiver(
             xx_q,
             yy_q,
@@ -399,7 +505,7 @@ class VelocityVectorUaxAnalyzer:
         )
         ax_vec.set_xlabel(r"$(x_{\mathrm{front}}-x)/H_0$", fontsize=self.label_fontsize)
         ax_vec.set_yticks([0.0, 0.5, 1.0])
-        ax_vec.set_ylabel(r"$z*$", fontsize=self.label_fontsize, rotation=0, labelpad=20)
+        ax_vec.set_ylabel(r"$y/H_0$", fontsize=self.label_fontsize, rotation=0, labelpad=20)
         ax_vec.set_xlim(float(np.max(x_plot)), 0.0)
         ax_vec.set_ylim(0.0, 1.0)
         ax_vec.tick_params(axis="both", labelsize=self.tick_fontsize, width=0.8, length=3.5)
@@ -486,7 +592,7 @@ class VelocityVectorUaxAnalyzer:
         #             frameon=True, framealpha=0.9, edgecolor="0.5")
         ax_q.set_xlabel(r"$(x_{\mathrm{front}}-x)/H_0$", fontsize=self.label_fontsize)
         ax_q.set_yticks([0.0, 0.5, 1.0])
-        ax_q.set_ylabel(r"$z*$", fontsize=self.label_fontsize, rotation=0, labelpad=20)
+        ax_q.set_ylabel(r"$y/H_0$", fontsize=self.label_fontsize, rotation=0, labelpad=20)
         ax_q.set_xlim(float(np.max(x_plot)), 0.0)
         ax_q.set_ylim(0.0, 1.0)
         ax_q.tick_params(axis="both", labelsize=self.tick_fontsize, width=0.8, length=3.5)
@@ -517,6 +623,22 @@ class VelocityVectorUaxAnalyzer:
         ux_2d = np.mean(data_3d.ux, axis=2)
         uy_2d = np.mean(data_3d.uy, axis=2)
         q_2d = np.mean(data_3d.q, axis=2)
+        omega_z_2d = np.mean(data_3d.omega_z, axis=2)
+
+        circulation = self._integrate_circulation(
+            data_3d.x_axis[: head_idx + 1],
+            data_3d.y_axis,
+            omega_z_2d[: head_idx + 1, :],
+            alpha_2d[: head_idx + 1, :],
+            self.alpha_threshold,
+        )
+        out_dir = os.path.join(self.output_dir, f"vector_uax_t{float(time_v):.2f}")
+        os.makedirs(out_dir, exist_ok=True)
+        circulation_file = os.path.join(out_dir, f"circulation_spanwise_t{float(time_v):.2f}.txt")
+        with open(circulation_file, "w", encoding="utf-8") as stream:
+            stream.write("# Gamma = integral_A omega dot e_z dA [m^2/s]\n")
+            stream.write(f"{circulation:.12e}\n")
+        print(f"Circulation (signed, n=e_z): Gamma={circulation:.6e} m^2/s")
 
         self._save_uax_vector(
             float(time_v),
@@ -526,6 +648,7 @@ class VelocityVectorUaxAnalyzer:
             uy_2d,
             alpha_2d,
             q_2d,
+            omega_z_2d,
             head_idx,
             head_x,
         )

@@ -11,14 +11,14 @@ from matplotlib.colors import PowerNorm, TwoSlopeNorm
 class TurbidityCurrentAnalyzer:
     def __init__(self):
         # OpenFOAM case
-        self.sol = "/media/amber/PhD_TC/Turbidity_current/Bonnecaze/Middle_particle23/case230327_1"
+        # self.sol = "/media/amber/PhD_TC/Turbidity_current/Bonnecaze/Middle_particle23/case230327_1"
         # self.output_dir = "/home/amber/postpro/u_vorticity/tc3d_23ofcal"
-        # self.sol = "/media/amber/PhD_TC/Turbidity_current/Bonnecaze/FIne_particle9/case090327_11"
+        self.sol = "/media/amber/PhD_TC/Turbidity_current/Bonnecaze/FIne_particle9/case090327_11"
         # self.sol = "/media/amber/PhD_TC/Turbidity_current/Bonnecaze/FIne_particle9/2d/case090604_2test"
-        # self.sol = "/media/amber/PhD_TC/Turbidity_current/Bonnecaze/Middle_particle23/2D/case230604_3test"
+        # self.sol = "/media/amber/PhD_TC/Turbidity_current/Bonnecaze/Middle_particle23/2D/case230604_3"
         self.times = [15,25,35]
         self.output_root = "/home/amber/postpro/u_vorticity"
-        self.output_prefix = "tc3d_23"
+        self.output_prefix = "tc3d_9"
         
 
         # 仅读取已经算好的项
@@ -55,7 +55,7 @@ class TurbidityCurrentAnalyzer:
         self.curve_fig_size = (30, 6)
         self.curve_lw = 2.0
         self.alpha_threshold = 1e-5
-        self.alpha_interface = 1e-5  # iso-surface level used for interface sampling
+        self.alpha_interface = 1e-2  # iso-surface level used for interface sampling
         self.head_x_scale = 0.3
         self.clip_negative_x = True
         self.save_curve_csv = True
@@ -84,7 +84,13 @@ class TurbidityCurrentAnalyzer:
         self.advection_gamma = 0.45
         self.diffusion_percentile = (5.0, 90.0)
         self.diffusion_gamma = 0.35
-        self.export_paraview = False
+        # Export each spanwise-averaged quantity as a ParaView-readable VTK file.
+        self.export_paraview = True
+        # The 2D contour PNGs are not wanted; keep the code behind this flag.
+        self.save_contours = False
+        # Skip the 1D vertical-average / interface CSV outputs; the user wants
+        # the ParaView VTK files only.  Flip to True to re-enable.
+        self.save_vertical_average = False
         self.rhoa = 3217
         self.rhob = 1000
         self.time_scale = 1.175
@@ -568,6 +574,7 @@ class TurbidityCurrentAnalyzer:
         out_path: str,
         percentile: tuple = None,
         gamma: float = None,
+        overlay_2d: np.ndarray = None,
     ) -> None:
         q_plot = np.array(q_2d, copy=True)
         if self.clip_negative_x:
@@ -606,6 +613,22 @@ class TurbidityCurrentAnalyzer:
         plt.figure(figsize=self.fig_size)
         cf = plt.contourf(x_2d, y_2d, q_plot, levels=levels, cmap=self.cmap, norm=norm, extend="both")
         plt.colorbar(cf)
+
+        # Optionally overlay the alpha.a = alpha_threshold iso-line so the
+        # current interface is visible on top of every contour.
+        if overlay_2d is not None:
+            overlay_plot = np.array(overlay_2d, copy=True)
+            if self.clip_negative_x:
+                overlay_plot = np.where(x_2d < 0.0, np.nan, overlay_plot)
+            plt.contour(
+                x_2d,
+                y_2d,
+                overlay_plot,
+                levels=[self.alpha_threshold],
+                colors="k",
+                linestyles="--",
+                linewidths=1.2,
+            )
 
         plt.xlim(0.0, self.x_lim)
         plt.ylim(*self.y_lim)
@@ -649,6 +672,9 @@ class TurbidityCurrentAnalyzer:
         os.makedirs(output_dir, exist_ok=True)
         if self.export_paraview:
             os.makedirs(paraview_dir, exist_ok=True)
+        contour_dir = os.path.join(output_dir, f"contour_t{time_dir}")
+        if self.save_contours:
+            os.makedirs(contour_dir, exist_ok=True)
 
         print(f"Processing t={time_dir}...")
 
@@ -665,19 +691,33 @@ class TurbidityCurrentAnalyzer:
             print(f"  head_x={head_x:.4g} (idx={head_idx}, threshold={self.alpha_threshold:g})")
         x_plot_2d = self._to_head_frame_x(x_2d, head_x)
 
+        # VTK coordinates (head frame, y/H0), computed once per time step so the
+        # per-term files and alpha.a share identical geometry.  No truncation:
+        # the full dimensionless head-frame x computed above is written as-is.
+        x_vtk = None
+        y_vtk = None
+        if self.export_paraview:
+            x_vtk = x_plot_2d
+            y_vtk = y_2d / self.H0
+
         gravity1_2d = None
         pressure1_2d = None
         curve_terms_2d: Dict[str, np.ndarray] = {}
 
         # Method B (interface-first): interface height h(x, z) per (x, z) column
-        # in the 3D alpha field, before any spanwise averaging.
-        y_axis = y_2d[0, :]
-        x_seg0 = x_2d[:, 0][: head_idx + 1]
-        _, _, mask0 = self._trim_x_dime(x_seg0, head_x)
-        alpha_seg_3d = alpha_a_3d[: head_idx + 1, :, :][mask0, :, :]
-        h_xz = self._alpha_threshold_height_3d(alpha_seg_3d, y_axis, self.alpha_interface)
-        h_B = self._spanwise_nanmean(h_xz)  # spanwise-averaged interface height
+        # in the 3D alpha field, before any spanwise averaging.  Only needed for
+        # the interface-compare CSV, so skip it when that output is off.
         interface_3d_terms: Dict[str, np.ndarray] = {}
+        y_axis = y_2d[0, :]
+        h_B: Optional[np.ndarray] = None
+        h_xz: Optional[np.ndarray] = None
+        mask0: Optional[np.ndarray] = None
+        if self.save_vertical_average:
+            x_seg0 = x_2d[:, 0][: head_idx + 1]
+            _, _, mask0 = self._trim_x_dime(x_seg0, head_x)
+            alpha_seg_3d = alpha_a_3d[: head_idx + 1, :, :][mask0, :, :]
+            h_xz = self._alpha_threshold_height_3d(alpha_seg_3d, y_axis, self.alpha_interface)
+            h_B = self._spanwise_nanmean(h_xz)  # spanwise-averaged interface height
 
         for short_name, of_field_name in self.vort_fields.items():
             q_vec_3d = self._read_vector_3d(time_dir, of_field_name, sort_idx, nx, ny, nz)
@@ -685,12 +725,27 @@ class TurbidityCurrentAnalyzer:
             q_2d = self.vector_to_z_component_2d(q_vec_2d)
             q_2d = self.dimensionless_vorticity_transport(q_2d, self.rhob, self.time_scale)
 
+            # 2D contour right after the spanwise average (head frame, y/H0),
+            # with the alpha.a = alpha_threshold iso-line overlaid.
+            if self.save_contours:
+                contour_path = os.path.join(contour_dir, f"{short_name}_spanwise_t{time_dir}.png")
+                self._plot_contour(
+                    x_plot_2d,
+                    y_2d / self.H0,
+                    q_2d,
+                    title=f"{of_field_name} (z), spanwise-averaged",
+                    out_path=contour_path,
+                    overlay_2d=alpha_a_2d,
+                )
+
             # Method B: sample the z-component 3D field on the per-(x, z)
             # iso-surface, then spanwise-average those interface values.
-            q_z_3d = self.dimensionless_vorticity_transport(q_vec_3d[2], self.rhob, self.time_scale)
-            q_seg_3d = q_z_3d[: head_idx + 1, :, :][mask0, :, :]
-            val_xz = self._interp_along_y_3d(q_seg_3d, y_axis, h_xz)
-            interface_3d_terms[short_name] = self._spanwise_nanmean(val_xz)
+            # Only needed for the interface-compare CSV.
+            if self.save_vertical_average:
+                q_z_3d = self.dimensionless_vorticity_transport(q_vec_3d[2], self.rhob, self.time_scale)
+                q_seg_3d = q_z_3d[: head_idx + 1, :, :][mask0, :, :]
+                val_xz = self._interp_along_y_3d(q_seg_3d, y_axis, h_xz)
+                interface_3d_terms[short_name] = self._spanwise_nanmean(val_xz)
 
             if short_name == "gravity1":
                 gravity1_2d = q_2d
@@ -703,14 +758,7 @@ class TurbidityCurrentAnalyzer:
 
 
             if self.export_paraview:
-                # Prepare VTK coordinates: y should be normalized by H0, x should be
-                # the head-frame (x_plot_2d) clipped to [0, x_lim]. This keeps VTK
-                # coordinates consistent with plotted axes.
-                x_vtk = np.clip(x_plot_2d, 0.0, self.x_lim)
-                y_vtk = y_2d / self.H0
-
-                vtk_name = f"{short_name}_spanwise_t{time_dir}.vtk"
-                vtk_path = os.path.join(paraview_dir, vtk_name)
+                vtk_path = os.path.join(paraview_dir, f"{short_name}_spanwise_t{time_dir}.vtk")
                 self._save_paraview_vtk(
                     x_vtk,
                     y_vtk,
@@ -718,65 +766,82 @@ class TurbidityCurrentAnalyzer:
                     scalar_name=f"{short_name}_z_spanwise",
                     out_path=vtk_path,
                 )
-                self._save_paraview_vtk(
-                    x_vtk,
-                    y_vtk,
-                    alpha_a_2d,
-                    scalar_name="alpha_a_spanwise",
-                    out_path=os.path.join(paraview_dir, f"alpha_a_spanwise_t{time_dir}.vtk"),
-                )
 
-        if self.export_paraview and gravity1_2d is not None and pressure1_2d is not None:
-            gp_sum_2d = gravity1_2d + pressure1_2d
-            
-            gp_name = f"gravity1_plus_pressure1_spanwise_t{time_dir}.vtk"
-            gp_path = os.path.join(paraview_dir, gp_name)
-            # For combined field VTK also use clipped head-frame x and normalized y.
-            x_vtk = np.clip(x_plot_2d, 0.0, self.x_lim)
-            y_vtk = y_2d / self.H0
-
+        if self.export_paraview:
+            # alpha.a is written once here (previously inside the loop, where it
+            # was overwritten by every term).
+            alpha_vtk_path = os.path.join(paraview_dir, f"alpha_a_spanwise_t{time_dir}.vtk")
             self._save_paraview_vtk(
                 x_vtk,
                 y_vtk,
-                gp_sum_2d,
-                scalar_name="gravity1_plus_pressure1_z_spanwise",
-                out_path=gp_path,
+                alpha_a_2d,
+                scalar_name="alpha_a_spanwise",
+                out_path=alpha_vtk_path,
             )
-            print(f"  saved: {gp_path}")
+
+            # Combined fields: gravity + pressure, and the per-group sums
+            # (ddt_sum = ddt1+2+3, adv_sum = adv1..5, diff_sum = diff1..5,
+            # drag_sum = drag1+2+3).  Sums are taken on the already
+            # dimensionless 2D fields, so the result is also dimensionless.
+            combined_terms: Dict[str, np.ndarray] = {}
+            if gravity1_2d is not None and pressure1_2d is not None:
+                combined_terms["GP"] = gravity1_2d + pressure1_2d
+            for sum_name, term_names in self.curve_sum_groups.items():
+                if all(term_name in curve_terms_2d for term_name in term_names):
+                    combined_terms[sum_name] = sum(curve_terms_2d[term_name] for term_name in term_names)
+
+            for sum_name, sum_2d in combined_terms.items():
+                if sum_name == "GP":
+                    vtk_path = os.path.join(paraview_dir, f"gravity1_plus_pressure1_spanwise_t{time_dir}.vtk")
+                    scalar_name = "gravity1_plus_pressure1_z_spanwise"
+                else:
+                    vtk_path = os.path.join(paraview_dir, f"{sum_name}_spanwise_t{time_dir}.vtk")
+                    scalar_name = f"{sum_name}_z_spanwise"
+                self._save_paraview_vtk(
+                    x_vtk,
+                    y_vtk,
+                    sum_2d,
+                    scalar_name=scalar_name,
+                    out_path=vtk_path,
+                )
+                print(f"  saved: {vtk_path}")
  
 
 
-        curve_terms_for_output = dict(curve_terms_2d)
-        if gravity1_2d is not None and pressure1_2d is not None:
-            curve_terms_for_output["GP"] = gravity1_2d + pressure1_2d
-        for sum_name, term_names in self.curve_sum_groups.items():
-            if all(term_name in curve_terms_for_output for term_name in term_names):
-                curve_terms_for_output[sum_name] = sum(curve_terms_for_output[term_name] for term_name in term_names)
+        # 1D vertical-average / interface CSV outputs; disabled by default
+        # (only the 2D spanwise-averaged contours are wanted).
+        if self.save_vertical_average:
+            curve_terms_for_output = dict(curve_terms_2d)
+            if gravity1_2d is not None and pressure1_2d is not None:
+                curve_terms_for_output["GP"] = gravity1_2d + pressure1_2d
+            for sum_name, term_names in self.curve_sum_groups.items():
+                if all(term_name in curve_terms_for_output for term_name in term_names):
+                    curve_terms_for_output[sum_name] = sum(curve_terms_for_output[term_name] for term_name in term_names)
 
-        # Derived sums for method B (spanwise mean is linear, so the interface
-        # value of a sum equals the sum of the interface values).
-        for sum_name, term_names in self.curve_sum_groups.items():
-            if all(term_name in interface_3d_terms for term_name in term_names):
-                interface_3d_terms[sum_name] = sum(interface_3d_terms[term_name] for term_name in term_names)
-        if "gravity1" in interface_3d_terms and "pressure1" in interface_3d_terms:
-            interface_3d_terms["GP"] = interface_3d_terms["gravity1"] + interface_3d_terms["pressure1"]
+            # Derived sums for method B (spanwise mean is linear, so the interface
+            # value of a sum equals the sum of the interface values).
+            for sum_name, term_names in self.curve_sum_groups.items():
+                if all(term_name in interface_3d_terms for term_name in term_names):
+                    interface_3d_terms[sum_name] = sum(interface_3d_terms[term_name] for term_name in term_names)
+            if "gravity1" in interface_3d_terms and "pressure1" in interface_3d_terms:
+                interface_3d_terms["GP"] = interface_3d_terms["gravity1"] + interface_3d_terms["pressure1"]
 
-        if curve_terms_for_output:
-            df_curve = self._build_curve_dataframe(x_2d, y_2d, curve_terms_for_output, ubx_2d, head_idx, head_x)
-            self._save_curve_outputs(time_v, df_curve, output_dir)
+            if curve_terms_for_output:
+                df_curve = self._build_curve_dataframe(x_2d, y_2d, curve_terms_for_output, ubx_2d, head_idx, head_x)
+                self._save_curve_outputs(time_v, df_curve, output_dir)
 
-            # Interface values by both orderings; one CSV per time step.
-            df_iface = self._build_interface_dataframe_compare(
-                x_2d,
-                y_2d,
-                curve_terms_for_output,
-                interface_3d_terms,
-                alpha_a_2d,
-                h_B,
-                head_idx,
-                head_x,
-            )
-            self._save_interface_compare_outputs(time_v, df_iface, output_dir)
+                # Interface values by both orderings; one CSV per time step.
+                df_iface = self._build_interface_dataframe_compare(
+                    x_2d,
+                    y_2d,
+                    curve_terms_for_output,
+                    interface_3d_terms,
+                    alpha_a_2d,
+                    h_B,
+                    head_idx,
+                    head_x,
+                )
+                self._save_interface_compare_outputs(time_v, df_iface, output_dir)
 
     def run_analysis(self):
         os.makedirs(self.output_root, exist_ok=True)
